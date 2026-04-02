@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lyric Goat — Mumble to Lyrics</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">🐐 LYRIC GOAT</div>
+      <p class="tagline">Mumble → Lyrics. Your flow. Your words.</p>
+    </header>
+
+    <!-- Input Section -->
+    <section class="card input-section">
+      <h2 class="section-title">1. Drop Your Mumble</h2>
+
+      <!-- Mic Recording -->
+      <div class="record-zone">
+        <button id="recordBtn" class="btn btn-record" type="button">
+          <span class="mic-icon">🎙</span>
+          <span id="recordLabel">Hold to Record</span>
+        </button>
+        <div id="recordingStatus" class="recording-status hidden">
+          <span class="pulse-dot"></span> Recording...
+        </div>
+        <audio id="audioPreview" class="audio-preview hidden" controls></audio>
+      </div>
+
+      <div class="divider"><span>or</span></div>
+
+      <!-- File Upload -->
+      <label class="upload-label" for="fileInput">
+        <span class="upload-icon">📁</span>
+        <span id="uploadText">Upload Audio File</span>
+        <input type="file" id="fileInput" accept="audio/*" hidden />
+      </label>
+    </section>
+
+    <!-- Style Controls -->
+    <section class="card controls-section">
+      <h2 class="section-title">2. Set Your Style</h2>
+
+      <div class="controls-grid">
+
+        <div class="control-group">
+          <label class="control-label">TONE</label>
+          <div class="pill-group" data-group="tone">
+            <button class="pill active" data-value="melodic">Melodic</button>
+            <button class="pill" data-value="aggressive">Aggressive</button>
+            <button class="pill" data-value="simple">Simple</button>
+            <button class="pill" data-value="punchlines">Punchlines</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label class="control-label">MODE</label>
+          <div class="pill-group" data-group="mode">
+            <button class="pill active" data-value="verse">Verse</button>
+            <button class="pill" data-value="hook">Hook</button>
+            <button class="pill" data-value="story">Story</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label class="control-label">VIBE</label>
+          <div class="pill-group" data-group="vibe">
+            <button class="pill active" data-value="introspective">Introspective</button>
+            <button class="pill" data-value="sad">Sad</button>
+            <button class="pill" data-value="hype">Hype</button>
+            <button class="pill" data-value="love">Love</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Generate Button -->
+    <button id="generateBtn" class="btn btn-generate" disabled>
+      <span id="generateLabel">Generate Lyrics</span>
+      <span id="generateSpinner" class="spinner hidden"></span>
+    </button>
+
+    <!-- Results -->
+    <section id="resultsSection" class="hidden">
+
+      <!-- Rough Text -->
+      <div class="card rough-card">
+        <div class="rough-header">
+          <span class="rough-badge">RAW TRANSCRIPTION</span>
+        </div>
+        <p id="roughText" class="rough-text"></p>
+        <div class="flow-stats" id="flowStats"></div>
+      </div>
+
+      <!-- Lyric Versions -->
+      <div id="versionsContainer" class="versions-grid"></div>
+
+    </section>
+
+  </div>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
