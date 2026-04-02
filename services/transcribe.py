@@ -3,11 +3,20 @@ from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Musical context prompt — biases Whisper toward rap/singing vocabulary
+# and away from misinterpreting melody as speech noise.
+WHISPER_PROMPT = (
+    "hip hop rap lyrics mumble singing melody hook verse chorus "
+    "yeah ayy aye ooh nah gonna wanna tryna gotta"
+)
+
 
 def transcribe_audio(audio_path: str) -> dict:
     """
-    Transcribe audio file using OpenAI Whisper.
-    Returns rough text + word-level timestamps.
+    Transcribe audio using OpenAI Whisper with music-optimized settings.
+    - prompt: biases vocabulary toward rap/singing
+    - temperature=0: deterministic, most accurate decode
+    - word timestamps: needed for phrase detection and karaoke sync
     """
     with open(audio_path, "rb") as f:
         response = client.audio.transcriptions.create(
@@ -16,6 +25,8 @@ def transcribe_audio(audio_path: str) -> dict:
             response_format="verbose_json",
             timestamp_granularities=["word"],
             language="en",
+            prompt=WHISPER_PROMPT,
+            temperature=0,
         )
 
     words = []
@@ -28,7 +39,7 @@ def transcribe_audio(audio_path: str) -> dict:
             })
 
     return {
-        "text": response.text,
+        "text": response.text.strip(),
         "words": words,
         "duration": response.duration if hasattr(response, "duration") else None,
     }
