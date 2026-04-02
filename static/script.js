@@ -37,6 +37,17 @@ const timelinePlayhead = document.getElementById("timelinePlayhead");
 const timelinePhrases  = document.getElementById("timelinePhrases");
 const melodyBadge      = document.getElementById("melodyBadge");
 
+/* ══════════════════
+   TIPS TOGGLE
+   ══════════════════ */
+document.getElementById("tipsToggle").addEventListener("click", () => {
+  const body = document.getElementById("tipsBody");
+  const arrow = document.getElementById("tipsArrow");
+  const open = !body.classList.contains("hidden");
+  body.classList.toggle("hidden", open);
+  arrow.textContent = open ? "▼" : "▲";
+});
+
 /* ══════════════════════════════════
    RECORDING
    ══════════════════════════════════ */

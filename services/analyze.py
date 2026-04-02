@@ -33,13 +33,11 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     else:
         phrase_map = _build_melody_phrase_map(onset_times, beat_times)
 
-    # Add end_time to each phrase (used for word-level karaoke interpolation)
     duration = round(float(len(y) / sr), 2)
-    for i, phrase in enumerate(phrase_map):
-        if i + 1 < len(phrase_map):
-            phrase["end_time"] = phrase_map[i + 1]["start_time"]
-        else:
-            phrase["end_time"] = duration
+
+    # Ensure the last phrase has a valid end_time fallback
+    if phrase_map and phrase_map[-1].get("end_time", 0) <= phrase_map[-1]["start_time"]:
+        phrase_map[-1]["end_time"] = duration
 
     flow_map = _build_flow_map(word_timestamps, beat_times)
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)

@@ -656,6 +656,106 @@ body {
   color: var(--accent2);
 }
 
+/* ── Tips Section ── */
+.tips-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tips-toggle {
+  width: 100%;
+  background: var(--surface);
+  border: none;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+}
+
+.tips-toggle:hover { background: var(--surface2); color: var(--text); }
+
+.tips-arrow { font-size: 0.7rem; transition: transform 0.2s; }
+
+.tips-body {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.tips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.tip-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tip-icon { font-size: 1.2rem; }
+
+.tip-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.3px;
+}
+
+.tip-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.tip-text strong { color: var(--accent2); }
+
+.tips-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tips-quick-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+}
+
+.tips-combos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.combo-chip {
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  color: #a78bfa;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 50px;
+}
+
 /* ── Utilities ── */
 .hidden { display: none !important; }
 
