@@ -10,7 +10,9 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     y, sr = librosa.load(audio_path, sr=None)
 
     # Tempo and beat tracking
+    # librosa >= 0.10 returns tempo as a 1-element array, so squeeze to scalar
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+    tempo = float(np.squeeze(tempo))
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
     # Onset detection (where syllables/notes hit)
@@ -37,7 +39,7 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
 
     return {
-        "tempo_bpm": float(tempo),
+        "tempo_bpm": tempo,
         "beat_count": len(beat_times),
         "syllable_count": estimated_syllables,
         "energy_ratio": round(energy_ratio, 3),
