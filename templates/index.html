@@ -15,6 +15,67 @@
       <p class="tagline">Mumble → Lyrics. Your flow. Your words.</p>
     </header>
 
+    <!-- Tips Section -->
+    <section class="tips-section">
+      <button class="tips-toggle" id="tipsToggle">
+        <span>How to get the best output</span>
+        <span class="tips-arrow" id="tipsArrow">▼</span>
+      </button>
+      <div class="tips-body hidden" id="tipsBody">
+
+        <div class="tips-grid">
+
+          <div class="tip-card">
+            <div class="tip-icon">🎙</div>
+            <div class="tip-title">Recording setup</div>
+            <div class="tip-text">Use headphones or find a quiet room. Get close to your mic — 6 to 12 inches. Background noise confuses the transcription and kills syllable accuracy.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">🎵</div>
+            <div class="tip-title">How to mumble</div>
+            <div class="tip-text">Mumble WITH rhythm, not just words. The flow and cadence matter more than pronouncing words clearly. Natural pauses between phrases = natural bar breaks. Think in bars, not sentences.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">📏</div>
+            <div class="tip-title">Length &amp; structure</div>
+            <div class="tip-text">4–16 bars works best. Mumble one idea per session — don't try to cram a whole song. Each pause you take becomes a new bar. Short, punchy phrases give tighter results than long run-ons.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">🎛</div>
+            <div class="tip-title">Style controls</div>
+            <div class="tip-text">These directly change how the AI writes. <strong>Tone</strong> = how it hits. <strong>Mode</strong> = what it is (verse, hook, story). <strong>Vibe</strong> = the emotion behind it. Match all three to your idea before you generate.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">🔁</div>
+            <div class="tip-title">Iterate</div>
+            <div class="tip-text">First result not perfect? Don't re-record — just switch up the style controls and hit Generate again on the same audio. Try Melodic vs Rap vs Punchy and pick what fits.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">✅</div>
+            <div class="tip-title">Check the bars</div>
+            <div class="tip-text">Look at the Raw Transcription section after generating. It shows each bar with its syllable count. If a bar looks wrong (too many syllables or split badly), re-record that phrase more clearly.</div>
+          </div>
+
+        </div>
+
+        <div class="tips-quick">
+          <span class="tips-quick-label">QUICK COMBOS THAT WORK</span>
+          <div class="tips-combos">
+            <span class="combo-chip">Hook + Melodic + Sad = emotional chorus</span>
+            <span class="combo-chip">Verse + Aggressive + Hype = rap verse</span>
+            <span class="combo-chip">Hook + Simple + Love = singable R&amp;B hook</span>
+            <span class="combo-chip">Story + Punchlines + Introspective = deep verse</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
     <!-- Input Section -->
     <section class="card input-section">
       <h2 class="section-title">1. Drop Your Mumble</h2>
@@ -23,12 +84,81 @@
       <div class="record-zone">
         <button id="recordBtn" class="btn btn-record" type="button">
           <span class="mic-icon">🎙</span>
-          <span id="recordLabel">Hold to Record</span>
+          <span id="recordLabel">Start Recording</span>
         </button>
         <div id="recordingStatus" class="recording-status hidden">
-          <span class="pulse-dot"></span> Recording...
+          <span class="pulse-dot"></span> Recording
+          <span id="recordTimer" class="record-timer">00:00</span>
         </div>
         <audio id="audioPreview" class="audio-preview hidden" controls></audio>
+      </div>
+
+      <!-- Metronome -->
+      <div class="metronome-zone">
+        <div class="metronome-header">
+          <span class="metronome-label">METRONOME</span>
+          <span class="metronome-hint">Tap along while recording</span>
+        </div>
+
+        <div class="metronome-controls">
+          <!-- BPM control -->
+          <div class="bpm-control">
+            <button class="bpm-btn" id="bpmDown">−</button>
+            <div class="bpm-display">
+              <span id="bpmValue">90</span>
+              <span class="bpm-unit">BPM</span>
+            </div>
+            <button class="bpm-btn" id="bpmUp">+</button>
+          </div>
+
+          <!-- Beat indicator dots -->
+          <div class="beat-dots" id="beatDots">
+            <span class="beat-dot" data-beat="0"></span>
+            <span class="beat-dot" data-beat="1"></span>
+            <span class="beat-dot" data-beat="2"></span>
+            <span class="beat-dot" data-beat="3"></span>
+          </div>
+
+          <!-- Toggle -->
+          <button class="metro-toggle" id="metroToggle">
+            <span id="metroIcon">▶</span>
+            <span id="metroLabel">Start</span>
+          </button>
+        </div>
+
+        <!-- Common BPM presets -->
+        <div class="bpm-presets">
+          <button class="bpm-preset" data-bpm="70">70 — slow</button>
+          <button class="bpm-preset" data-bpm="90">90 — mid</button>
+          <button class="bpm-preset" data-bpm="120">120 — trap</button>
+          <button class="bpm-preset" data-bpm="140">140 — fast</button>
+        </div>
+
+        <!-- Key selector -->
+        <div class="key-section">
+          <div class="key-header">
+            <span class="metronome-label">KEY</span>
+            <span id="detectedKeyBadge" class="detected-key-badge hidden"></span>
+          </div>
+          <div class="key-grid" id="keyGrid">
+            <button class="key-btn" data-key="C">C</button>
+            <button class="key-btn" data-key="C#">C#</button>
+            <button class="key-btn" data-key="D">D</button>
+            <button class="key-btn" data-key="D#">D#</button>
+            <button class="key-btn" data-key="E">E</button>
+            <button class="key-btn" data-key="F">F</button>
+            <button class="key-btn" data-key="F#">F#</button>
+            <button class="key-btn" data-key="G">G</button>
+            <button class="key-btn" data-key="G#">G#</button>
+            <button class="key-btn" data-key="A">A</button>
+            <button class="key-btn" data-key="A#">A#</button>
+            <button class="key-btn" data-key="B">B</button>
+          </div>
+          <div class="key-quality">
+            <button class="key-quality-btn active" data-quality="major">Major</button>
+            <button class="key-quality-btn" data-quality="minor">Minor</button>
+          </div>
+        </div>
       </div>
 
       <div class="divider"><span>or</span></div>
@@ -48,6 +178,15 @@
       <div class="controls-grid">
 
         <div class="control-group">
+          <label class="control-label">APPROACH <span class="control-hint">how the AI reads your mumble</span></label>
+          <div class="pill-group" data-group="gen_mode">
+            <button class="pill active" data-value="cadence">Cadence — follow the rhythm</button>
+            <button class="pill" data-value="literal">Literal — decode the words</button>
+            <button class="pill" data-value="creative">Creative — vibe only</button>
+          </div>
+        </div>
+
+        <div class="control-group">
           <label class="control-label">TONE</label>
           <div class="pill-group" data-group="tone">
             <button class="pill active" data-value="melodic">Melodic</button>
@@ -58,7 +197,7 @@
         </div>
 
         <div class="control-group">
-          <label class="control-label">MODE</label>
+          <label class="control-label">TYPE</label>
           <div class="pill-group" data-group="mode">
             <button class="pill active" data-value="verse">Verse</button>
             <button class="pill" data-value="hook">Hook</button>
@@ -88,12 +227,25 @@
     <!-- Results -->
     <section id="resultsSection" class="hidden">
 
-      <!-- Rough Text -->
+      <!-- Rough Text + Phrase Timeline -->
       <div class="card rough-card">
         <div class="rough-header">
           <span class="rough-badge">RAW TRANSCRIPTION</span>
+          <span class="rough-badge melody-badge hidden" id="melodyBadge">MELODY MODE</span>
+          <span class="rough-badge detected-badge hidden" id="repetitiveBadge">REPETITIVE — cadence used</span>
         </div>
-        <p id="roughText" class="rough-text"></p>
+        <div id="analysisChips" class="analysis-chips"></div>
+        <div id="roughText" class="rough-text"></div>
+
+        <!-- Phrase timeline -->
+        <div class="timeline-wrap" id="timelineWrap">
+          <div class="timeline-label">PHRASE MAP — click any block to seek</div>
+          <div class="timeline-track" id="timelineTrack">
+            <div class="timeline-playhead" id="timelinePlayhead"></div>
+          </div>
+          <div class="timeline-phrases" id="timelinePhrases"></div>
+        </div>
+
         <div class="flow-stats" id="flowStats"></div>
       </div>
 
