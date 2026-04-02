@@ -86,6 +86,7 @@ def _build_user_prompt(
     vibe_desc = STYLE_DESCRIPTIONS["vibe"].get(vibe, vibe)
 
     tempo = flow_data.get("tempo_bpm", "unknown")
+    tempo_str = f"{tempo:.0f}" if isinstance(tempo, float) else str(tempo)
     flow_style = flow_data.get("flow_style", "mixed")
     phrase_map = flow_data.get("phrase_map", [])
     melody_mode = flow_data.get("melody_mode", False)
@@ -96,7 +97,7 @@ def _build_user_prompt(
 The artist hummed a melody. There are no source words to preserve.
 Your only constraints are the rhythm template below.
 
-TEMPO: {tempo:.0f if isinstance(tempo, float) else tempo} BPM  |  FLOW STYLE: {flow_style}
+TEMPO: {tempo_str} BPM  |  FLOW STYLE: {flow_style}
 
 MELODY RHYTHM TEMPLATE (syllable count per phrase):
 {phrase_template if phrase_template else "  (no phrase data — use your judgment)"}"""
@@ -112,7 +113,7 @@ MELODY RHYTHM TEMPLATE (syllable count per phrase):
         input_block = f"""FULL ROUGH TRANSCRIPTION:
 "{rough_text}"
 
-TEMPO: {tempo:.0f if isinstance(tempo, float) else tempo} BPM  |  FLOW STYLE: {flow_style}
+TEMPO: {tempo_str} BPM  |  FLOW STYLE: {flow_style}
 
 LINE-BY-LINE BREAKDOWN (each line = a natural phrase from the recording):
 {phrase_template if phrase_template else '  (no phrase data — use the full transcription)'}"""
