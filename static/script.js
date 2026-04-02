@@ -11,7 +11,6 @@ let currentPhraseMap = [];
 let audioDuration = 0;
 let syncInterval = null;
 let activeSyncCard = null;
-let activeWordTimings = []; // flat array of {el, start, end} for word-level sync
 
 const state = { tone: "melodic", mode: "verse", vibe: "introspective" };
 
@@ -338,27 +337,40 @@ function renderResults(data) {
 
 /* ══════════════════════════════════════
    ORGANIZED TRANSCRIPT
-   Shows bars as individual lines with syllable count badges
+   Shows syllable placeholders per bar —
+   "da da da da" — not the guessed words.
+   Whisper's text shown small underneath
+   as a reference only.
    ══════════════════════════════════════ */
+function makeSyllablePlaceholder(count) {
+  // Alternate da/dah for a more musical feel
+  const syllables = ["da", "dah", "da", "da", "dah", "da", "dah", "da", "da", "dah", "da", "dah"];
+  return Array.from({ length: count }, (_, i) => syllables[i % syllables.length]).join(" ");
+}
+
 function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
-  if (!phraseMap.length || melodyMode) {
-    roughTextEl.innerHTML = `<span class="rough-plain">${escapeHtml(roughText || "(melody — no words detected)")}</span>`;
+  if (!phraseMap.length) {
+    roughTextEl.innerHTML = `<span class="rough-plain">${escapeHtml(roughText || "(no audio detected)")}</span>`;
     return;
   }
 
   const bars = phraseMap.map((phrase, i) => {
-    const text = phrase.text || "";
     const syls = phrase.syllables || 0;
+    const placeholder = makeSyllablePlaceholder(syls);
+    const whisperText = phrase.text || "";
+
     return `<div class="transcript-bar" data-index="${i}">
       <span class="bar-num">${i + 1}</span>
-      <span class="bar-text">${escapeHtml(text)}</span>
+      <div class="bar-content">
+        <span class="bar-placeholder">${escapeHtml(placeholder)}</span>
+        ${whisperText ? `<span class="bar-whisper">${escapeHtml(whisperText)}</span>` : ""}
+      </div>
       <span class="bar-syls">${syls} syl</span>
     </div>`;
   }).join("");
 
   roughTextEl.innerHTML = bars;
 
-  // Click a bar to seek audio
   roughTextEl.querySelectorAll(".transcript-bar").forEach((bar) => {
     bar.addEventListener("click", () => {
       const idx = parseInt(bar.dataset.index);
@@ -438,7 +450,7 @@ function onTimelineUpdate() {
 }
 
 /* ══════════════════════════════════════
-   VERSION CARDS WITH WORD-LEVEL KARAOKE
+   VERSION CARDS
    ══════════════════════════════════════ */
 function createVersionCard(version, isBest, phraseMap) {
   const card = document.createElement("div");
@@ -447,14 +459,9 @@ function createVersionCard(version, isBest, phraseMap) {
   const scorePercent = Math.round((version.score || 0) * 100);
   const lines = (version.lyrics || "").split("\n").filter((l) => l.trim());
 
-  // Build word-span lyric lines
-  const lyricsHtml = lines.map((line, lineIdx) => {
-    const words = line.trim().split(/\s+/);
-    const wordSpans = words.map((w, wi) =>
-      `<span class="lyric-word" data-line="${lineIdx}" data-word="${wi}">${escapeHtml(w)}</span>`
-    ).join(" ");
-    return `<div class="lyric-line" data-line="${lineIdx}">${wordSpans}</div>`;
-  }).join("");
+  const lyricsHtml = lines.map((line, lineIdx) =>
+    `<div class="lyric-line" data-line="${lineIdx}">${escapeHtml(line)}</div>`
+  ).join("");
 
   card.innerHTML = `
     <div class="version-header">
@@ -484,7 +491,7 @@ function createVersionCard(version, isBest, phraseMap) {
   const syncBtn = card.querySelector(".sync-btn");
   if (syncBtn) {
     syncBtn.addEventListener("click", () => {
-      activeSyncCard === card ? stopSync() : startSync(card, syncBtn, lines, phraseMap);
+      activeSyncCard === card ? stopSync() : startSync(card, syncBtn, phraseMap);
     });
   }
 
@@ -492,89 +499,35 @@ function createVersionCard(version, isBest, phraseMap) {
 }
 
 /* ══════════════════════════════════════
-   WORD-LEVEL KARAOKE SYNC
+   LINE-LEVEL KARAOKE SYNC
+   Uses real Whisper phrase timestamps —
+   highlights the whole line when that
+   phrase is playing. Accurate.
    ══════════════════════════════════════ */
-function buildWordTimings(lines, phraseMap, totalDuration) {
-  /**
-   * For each lyric line (= one phrase), interpolate per-word timings
-   * by dividing the phrase duration evenly across its words.
-   */
-  const timings = [];
-
-  lines.forEach((line, lineIdx) => {
-    const phrase = phraseMap[lineIdx];
-    if (!phrase) return;
-
-    const phraseStart = phrase.start_time;
-    const phraseEnd = phrase.end_time || (phraseMap[lineIdx + 1]?.start_time) || totalDuration;
-    const phraseDuration = Math.max(0.1, phraseEnd - phraseStart);
-
-    const words = line.trim().split(/\s+/);
-    const wordDuration = phraseDuration / words.length;
-
-    words.forEach((_, wi) => {
-      timings.push({
-        lineIdx,
-        wordIdx: wi,
-        start: phraseStart + wi * wordDuration,
-        end: phraseStart + (wi + 1) * wordDuration,
-      });
-    });
-  });
-
-  return timings;
-}
-
-function startSync(card, btn, lines, phraseMap) {
+function startSync(card, btn, phraseMap) {
   stopSync();
   activeSyncCard = card;
   btn.textContent = "■ Stop Sync";
   btn.classList.add("syncing");
-
-  // Build word-level timing map
-  activeWordTimings = buildWordTimings(lines, phraseMap, audioDuration);
 
   audioPreview.currentTime = 0;
   audioPreview.play();
 
   syncInterval = setInterval(() => {
     const t = audioPreview.currentTime;
+    const activeIdx = getCurrentPhraseIndex(t);
 
-    // Find current word
-    let currentTiming = null;
-    for (const timing of activeWordTimings) {
-      if (t >= timing.start && t < timing.end) {
-        currentTiming = timing;
-        break;
-      }
-    }
-
-    // Apply highlights
     card.querySelectorAll(".lyric-line").forEach((lineEl) => {
       const li = parseInt(lineEl.dataset.line);
-      const isCurrentLine = currentTiming && li === currentTiming.lineIdx;
-      const isPastLine = currentTiming ? li < currentTiming.lineIdx : false;
-      lineEl.classList.toggle("past-line", isPastLine);
-      lineEl.classList.toggle("current-line", isCurrentLine);
+      lineEl.classList.toggle("current-line", li === activeIdx);
+      lineEl.classList.toggle("past-line", li < activeIdx);
     });
 
-    card.querySelectorAll(".lyric-word").forEach((wordEl) => {
-      const li = parseInt(wordEl.dataset.line);
-      const wi = parseInt(wordEl.dataset.word);
-      const isActive = currentTiming && li === currentTiming.lineIdx && wi === currentTiming.wordIdx;
-      const isPast = currentTiming
-        ? (li < currentTiming.lineIdx || (li === currentTiming.lineIdx && wi < currentTiming.wordIdx))
-        : false;
-      wordEl.classList.toggle("word-active", isActive);
-      wordEl.classList.toggle("word-past", isPast);
-    });
-
-    // Auto-scroll active line into view
     const activeLine = card.querySelector(".lyric-line.current-line");
     if (activeLine) activeLine.scrollIntoView({ block: "nearest", behavior: "smooth" });
 
     if (audioPreview.ended || audioPreview.paused) stopSync();
-  }, 50); // 50ms for smooth word tracking
+  }, 50);
 
   audioPreview.addEventListener("ended", stopSync, { once: true });
 }
@@ -582,11 +535,10 @@ function startSync(card, btn, lines, phraseMap) {
 function stopSync() {
   clearInterval(syncInterval);
   syncInterval = null;
-  activeWordTimings = [];
 
   if (activeSyncCard) {
-    activeSyncCard.querySelectorAll(".lyric-line, .lyric-word").forEach((el) => {
-      el.classList.remove("current-line", "past-line", "word-active", "word-past");
+    activeSyncCard.querySelectorAll(".lyric-line").forEach((el) => {
+      el.classList.remove("current-line", "past-line");
     });
     const btn = activeSyncCard.querySelector(".sync-btn");
     if (btn) { btn.textContent = "▶ Play Synced"; btn.classList.remove("syncing"); }

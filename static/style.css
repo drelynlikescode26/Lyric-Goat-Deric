@@ -640,11 +640,29 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.bar-text {
+.bar-content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bar-placeholder {
   font-size: 0.95rem;
   color: var(--text);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.bar-whisper {
+  font-size: 0.72rem;
+  color: var(--text-muted);
   font-style: italic;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bar-syls {
@@ -758,36 +776,22 @@ body {
 
 /* ── Karaoke — line level ── */
 .lyric-line {
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 4px;
-  transition: color 0.2s;
+  border-left: 2px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
   cursor: default;
   line-height: 2;
 }
 
 .lyric-line.current-line {
-  background: rgba(124, 58, 237, 0.15);
+  background: rgba(124, 58, 237, 0.18);
+  border-left-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 
 .lyric-line.past-line {
-  color: var(--text-muted);
-}
-
-/* ── Karaoke — word level ── */
-.lyric-word {
-  display: inline;
-  border-radius: 3px;
-  padding: 1px 2px;
-  transition: background 0.1s, color 0.1s;
-}
-
-.lyric-word.word-active {
-  background: rgba(124, 58, 237, 0.5);
-  color: #fff;
-  font-weight: 700;
-}
-
-.lyric-word.word-past {
   color: var(--text-muted);
 }
 
