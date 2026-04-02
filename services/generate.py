@@ -93,18 +93,26 @@ def _extract_phonetic_anchors(phrase_map: list) -> list:
 # ── Prompt building ────────────────────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
-    return (
-        "You are an elite ghostwriter and lyricist with years of experience working with "
-        "hip-hop, R&B, and trap artists. You specialize in taking raw mumble recordings — "
-        "rough ideas, half-formed melodies, and phonetic sketches — and transforming them "
-        "into polished, authentic lyrics.\n\n"
-        "Your output must:\n"
-        "- Match each line's syllable count EXACTLY (±1 max)\n"
-        "- Preserve the emotional energy and key sounds of the original mumble\n"
-        "- Use the provided rhyme/sound anchors to keep the output sounding like the artist\n"
-        "- Never be generic — every line should feel personal and intentional\n"
-        "- Flow naturally when sung or rapped at the given tempo"
-    )
+    return """\
+You are a world-class songwriter and ghostwriter. You have written for Grammy-winning artists \
+across hip-hop, R&B, trap, and pop. You do not write filler. You do not write generic lines. \
+Every bar you write has intent behind it.
+
+YOUR CRAFT:
+- You write from the inside out — emotion first, words second
+- You use SPECIFIC, CONCRETE images ("streetlight on a Tuesday" not "the city at night")
+- You layer meaning: a line about a girl can also be about ambition, a line about money can also be about worth
+- You use internal rhymes, assonance, and alliteration — not just end rhymes
+- You vary line length and rhythm to create tension and release
+- You never use these clichés: "ride or die", "real ones", "on top of the world", "grind never stops", \
+"make it rain", "all eyes on me", "can't stop won't stop"
+- You write lines people want to repeat and remember
+
+YOUR CONSTRAINTS HERE:
+- Match each bar's syllable count precisely (±1 max) — the flow cannot be broken
+- Use the rhyme targets to anchor sounds to the original mumble
+- The number of output lines MUST equal the number of input bars exactly
+- No labels, headers, or explanations — pure lyrics only"""
 
 
 def _build_phrase_template(phrase_map: list, phonetic_anchors: list, melody_mode: bool) -> str:
@@ -149,47 +157,46 @@ def _build_user_prompt(
 
     if melody_mode:
         input_block = f"""INPUT TYPE: Pure melody/hum — no words detected
-The artist hummed/sang a melody. No source words to preserve.
-Use the rhythm template and rhyme targets below as your constraints.
+The artist hummed a melody. There are no source words — only the rhythm and feel.
 
 TEMPO: {tempo_str} BPM  |  FLOW STYLE: {flow_style}
 
-MELODY RHYTHM TEMPLATE:
-{phrase_template or "  (no phrase data — use your judgment)"}"""
+BAR-BY-BAR RHYTHM TEMPLATE:
+{phrase_template or "  (no phrase data — use your best judgment)"}"""
 
-        rules = f"""RULES:
-1. Write one line for EVERY phrase in the template — same count, same order
-2. Match each line's syllable count (±1 max)
-3. The ending sound of each line should match the rhyme target shown
-4. Write original, vivid lyrics that feel made for this melody
-5. Rhymes must be natural — never sacrifice meaning to force one
-6. Vibe: {vibe_desc}
-7. Output ONLY the lyrics — no labels, no line numbers, no explanation"""
+        rules = f"""RULES — follow every one:
+1. Write exactly one lyric line per bar in the template above
+2. Each line MUST hit the syllable count shown (±1 max) — the flow depends on this
+3. End each line on or near the rhyme target sound shown
+4. No filler lines — every bar must carry weight
+5. Think like a songwriter: specific images, layered meaning, emotional truth
+6. Vibe is {vibe_desc} — every word should serve that
+7. Output ONLY the lyrics — no bar numbers, no labels, no explanation"""
 
     else:
-        input_block = f"""ROUGH TRANSCRIPTION:
+        input_block = f"""ARTIST'S RAW MUMBLE:
 "{rough_text}"
 
 TEMPO: {tempo_str} BPM  |  FLOW STYLE: {flow_style}
 
-LINE-BY-LINE BREAKDOWN:
+ORGANIZED BARS (each bar = one lyric line):
 {phrase_template or "  (no phrase data — use the full transcription)"}"""
 
-        rules = f"""RULES:
-1. Write one line for EVERY line in the breakdown — same count, same order
-2. Match each line's syllable count (±1 max)
-3. The ending sound of each line should match the rhyme target shown — this keeps it sounding like YOUR mumble
-4. Keep key words and sounds from the original where they fit naturally
-5. Preserve the emotional feel of each original line
-6. Rhymes must be natural — never sacrifice meaning to force one
-7. Vibe: {vibe_desc}
-8. Output ONLY the lyrics — no labels, no line numbers, no explanation"""
+        rules = f"""RULES — follow every one:
+1. Write exactly one lyric line per bar shown above — same count, same order
+2. Each line MUST match the bar's syllable count (±1 max) — the flow must feel identical to the mumble
+3. End each line on or near the rhyme target sound shown — it should sound like the mumble when sung
+4. Keep key words or phonetic sounds from the mumble where they fit — don't throw away the original
+5. Think like a songwriter: specific images, emotional truth, no generic phrases
+6. Each line should stand alone as something worth saying
+7. Vibe is {vibe_desc} — every word should serve that
+8. Output ONLY the lyrics — no bar numbers, no labels, no explanation"""
 
-    return f"""Raw vocal recording from an artist.
+    return f"""Artist's raw vocal recording — transform this into real lyrics.
 
 {input_block}
 
-STYLE:
+STYLE DIRECTION:
 - Tone: {tone} → {tone_desc}
 - Mode: {mode} → {mode_desc}
 - Vibe: {vibe} → {vibe_desc}

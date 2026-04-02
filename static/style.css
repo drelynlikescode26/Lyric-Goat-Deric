@@ -439,6 +439,59 @@ body {
   font-style: italic;
 }
 
+/* ── Organized Transcript Bars ── */
+.rough-plain {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.transcript-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-left: 2px solid transparent;
+}
+
+.transcript-bar:hover {
+  background: rgba(255,255,255,0.04);
+  border-left-color: var(--border);
+}
+
+.transcript-bar.bar-active {
+  background: rgba(124, 58, 237, 0.12);
+  border-left-color: var(--accent);
+}
+
+.bar-num {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-text {
+  flex: 1;
+  font-size: 0.95rem;
+  color: var(--text);
+  font-style: italic;
+}
+
+.bar-syls {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--accent2);
+  background: rgba(6,182,212,0.1);
+  border: 1px solid rgba(6,182,212,0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
 .flow-stats {
   display: flex;
   gap: 16px;
@@ -537,21 +590,38 @@ body {
   color: var(--text);
 }
 
-/* Karaoke lines */
+/* ── Karaoke — line level ── */
 .lyric-line {
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 4px;
-  transition: background 0.15s, color 0.15s;
+  transition: color 0.2s;
   cursor: default;
+  line-height: 2;
 }
 
-.lyric-line.active-line {
-  background: rgba(124, 58, 237, 0.25);
-  color: #fff;
-  font-weight: 600;
+.lyric-line.current-line {
+  background: rgba(124, 58, 237, 0.15);
 }
 
 .lyric-line.past-line {
+  color: var(--text-muted);
+}
+
+/* ── Karaoke — word level ── */
+.lyric-word {
+  display: inline;
+  border-radius: 3px;
+  padding: 1px 2px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.lyric-word.word-active {
+  background: rgba(124, 58, 237, 0.5);
+  color: #fff;
+  font-weight: 700;
+}
+
+.lyric-word.word-past {
   color: var(--text-muted);
 }
 

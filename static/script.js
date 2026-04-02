@@ -7,60 +7,50 @@ let isRecording = false;
 let timerInterval = null;
 let recordingSeconds = 0;
 
-// Result state
 let currentPhraseMap = [];
 let audioDuration = 0;
 let syncInterval = null;
 let activeSyncCard = null;
+let activeWordTimings = []; // flat array of {el, start, end} for word-level sync
 
-const state = {
-  tone: "melodic",
-  mode: "verse",
-  vibe: "introspective",
-};
+const state = { tone: "melodic", mode: "verse", vibe: "introspective" };
 
 /* ── DOM refs ── */
-const recordBtn       = document.getElementById("recordBtn");
-const recordLabel     = document.getElementById("recordLabel");
-const recordingStatus = document.getElementById("recordingStatus");
-const recordTimer     = document.getElementById("recordTimer");
-const audioPreview    = document.getElementById("audioPreview");
-const fileInput       = document.getElementById("fileInput");
-const uploadText      = document.getElementById("uploadText");
-const uploadLabel     = document.querySelector(".upload-label");
-const generateBtn     = document.getElementById("generateBtn");
-const generateLabel   = document.getElementById("generateLabel");
-const generateSpinner = document.getElementById("generateSpinner");
-const resultsSection  = document.getElementById("resultsSection");
-const roughText       = document.getElementById("roughText");
-const flowStats       = document.getElementById("flowStats");
+const recordBtn        = document.getElementById("recordBtn");
+const recordLabel      = document.getElementById("recordLabel");
+const recordingStatus  = document.getElementById("recordingStatus");
+const recordTimer      = document.getElementById("recordTimer");
+const audioPreview     = document.getElementById("audioPreview");
+const fileInput        = document.getElementById("fileInput");
+const uploadText       = document.getElementById("uploadText");
+const uploadLabel      = document.querySelector(".upload-label");
+const generateBtn      = document.getElementById("generateBtn");
+const generateLabel    = document.getElementById("generateLabel");
+const generateSpinner  = document.getElementById("generateSpinner");
+const resultsSection   = document.getElementById("resultsSection");
+const roughTextEl      = document.getElementById("roughText");
+const flowStats        = document.getElementById("flowStats");
 const versionsContainer = document.getElementById("versionsContainer");
-const timelineWrap    = document.getElementById("timelineWrap");
-const timelineTrack   = document.getElementById("timelineTrack");
+const timelineWrap     = document.getElementById("timelineWrap");
+const timelineTrack    = document.getElementById("timelineTrack");
 const timelinePlayhead = document.getElementById("timelinePlayhead");
-const timelinePhrases = document.getElementById("timelinePhrases");
-const melodyBadge     = document.getElementById("melodyBadge");
+const timelinePhrases  = document.getElementById("timelinePhrases");
+const melodyBadge      = document.getElementById("melodyBadge");
 
 /* ══════════════════════════════════
-   RECORDING — click to start / stop
+   RECORDING
    ══════════════════════════════════ */
-recordBtn.addEventListener("click", () => {
-  if (isRecording) stopRecording();
-  else startRecording();
-});
+recordBtn.addEventListener("click", () => isRecording ? stopRecording() : startRecording());
 
 async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
     mediaRecorder = new MediaRecorder(stream, { mimeType: getSupportedMimeType() });
-
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = () => {
-      const mimeType = getSupportedMimeType();
-      recordedBlob = new Blob(audioChunks, { type: mimeType });
+      recordedBlob = new Blob(audioChunks, { type: getSupportedMimeType() });
       uploadedFile = null;
-
       audioPreview.src = URL.createObjectURL(recordedBlob);
       audioPreview.classList.remove("hidden");
       recordBtn.classList.remove("recording");
@@ -72,7 +62,6 @@ async function startRecording() {
       stream.getTracks().forEach((t) => t.stop());
       checkReady();
     };
-
     mediaRecorder.start();
     isRecording = true;
     recordedBlob = null;
@@ -104,8 +93,9 @@ function updateTimer() {
 }
 
 function getSupportedMimeType() {
-  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
-  for (const t of types) { if (MediaRecorder.isTypeSupported(t)) return t; }
+  for (const t of ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus","audio/mp4"]) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
   return "";
 }
 
@@ -139,9 +129,7 @@ document.querySelectorAll(".pill-group").forEach((group) => {
   });
 });
 
-function checkReady() {
-  generateBtn.disabled = !(recordedBlob || uploadedFile);
-}
+function checkReady() { generateBtn.disabled = !(recordedBlob || uploadedFile); }
 
 /* ══════════════════
    GENERATE
@@ -149,10 +137,9 @@ function checkReady() {
 generateBtn.addEventListener("click", async () => {
   if (!(recordedBlob || uploadedFile)) return;
   setGenerating(true);
-
   const formData = new FormData();
   if (recordedBlob) {
-    const ext = getExtFromMime(recordedBlob.type);
+    const ext = recordedBlob.type.includes("ogg") ? "ogg" : recordedBlob.type.includes("mp4") ? "mp4" : "webm";
     formData.append("audio", recordedBlob, `recording.${ext}`);
   } else {
     formData.append("audio", uploadedFile, uploadedFile.name);
@@ -173,13 +160,6 @@ generateBtn.addEventListener("click", async () => {
   }
 });
 
-function getExtFromMime(mimeType) {
-  if (mimeType.includes("webm")) return "webm";
-  if (mimeType.includes("ogg")) return "ogg";
-  if (mimeType.includes("mp4")) return "mp4";
-  return "webm";
-}
-
 function setGenerating(loading) {
   generateBtn.disabled = loading;
   generateBtn.classList.toggle("loading", loading);
@@ -191,38 +171,30 @@ function setGenerating(loading) {
    RENDER RESULTS
    ══════════════════════════════════════ */
 function renderResults(data) {
-  // Stop any previous sync
   stopSync();
-
   resultsSection.classList.remove("hidden");
 
-  // Store phrase map + duration for karaoke sync
   currentPhraseMap = data.phrase_map || [];
   audioDuration = data.flow?.duration || 0;
 
-  // Rough text
-  roughText.textContent = data.rough_text || "(melody only — no words detected)";
+  // Organized transcript — bars with syllable counts
+  renderOrganizedTranscript(data.rough_text || "", currentPhraseMap, data.melody_mode);
 
   // Melody badge
-  if (data.melody_mode) {
-    melodyBadge.classList.remove("hidden");
-  } else {
-    melodyBadge.classList.add("hidden");
-  }
+  melodyBadge.classList.toggle("hidden", !data.melody_mode);
 
-  // Phrase timeline
+  // Timeline
   renderTimeline(currentPhraseMap, audioDuration);
 
   // Flow stats
   const flow = data.flow || {};
   flowStats.innerHTML = [
-    flow.tempo_bpm   ? `<div class="stat-chip"><strong>${Math.round(flow.tempo_bpm)}</strong> BPM</div>` : "",
-    flow.flow_style  ? `<div class="stat-chip">Flow: <strong>${flow.flow_style}</strong></div>` : "",
+    flow.tempo_bpm    ? `<div class="stat-chip"><strong>${Math.round(flow.tempo_bpm)}</strong> BPM</div>` : "",
+    flow.flow_style   ? `<div class="stat-chip">Flow: <strong>${flow.flow_style}</strong></div>` : "",
     flow.syllable_count ? `<div class="stat-chip"><strong>~${flow.syllable_count}</strong> syllables</div>` : "",
-    data.melody_mode ? `<div class="stat-chip melody-chip"><strong>melody mode</strong></div>` : "",
+    data.melody_mode  ? `<div class="stat-chip melody-chip"><strong>melody mode</strong></div>` : "",
   ].join("");
 
-  // Lyric version cards
   versionsContainer.innerHTML = "";
   (data.versions || []).forEach((v, idx) => {
     versionsContainer.appendChild(createVersionCard(v, idx === 0, currentPhraseMap));
@@ -232,11 +204,50 @@ function renderResults(data) {
 }
 
 /* ══════════════════════════════════════
+   ORGANIZED TRANSCRIPT
+   Shows bars as individual lines with syllable count badges
+   ══════════════════════════════════════ */
+function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
+  if (!phraseMap.length || melodyMode) {
+    roughTextEl.innerHTML = `<span class="rough-plain">${escapeHtml(roughText || "(melody — no words detected)")}</span>`;
+    return;
+  }
+
+  const bars = phraseMap.map((phrase, i) => {
+    const text = phrase.text || "";
+    const syls = phrase.syllables || 0;
+    return `<div class="transcript-bar" data-index="${i}">
+      <span class="bar-num">${i + 1}</span>
+      <span class="bar-text">${escapeHtml(text)}</span>
+      <span class="bar-syls">${syls} syl</span>
+    </div>`;
+  }).join("");
+
+  roughTextEl.innerHTML = bars;
+
+  // Click a bar to seek audio
+  roughTextEl.querySelectorAll(".transcript-bar").forEach((bar) => {
+    bar.addEventListener("click", () => {
+      const idx = parseInt(bar.dataset.index);
+      if (currentPhraseMap[idx]) {
+        audioPreview.currentTime = currentPhraseMap[idx].start_time;
+        audioPreview.play();
+      }
+    });
+  });
+}
+
+/* ══════════════════════════════════════
    PHRASE TIMELINE
    ══════════════════════════════════════ */
 function renderTimeline(phraseMap, duration) {
   timelinePhrases.innerHTML = "";
   timelinePlayhead.style.left = "0%";
+
+  // Clear old blocks from track (keep playhead)
+  Array.from(timelineTrack.children).forEach((c) => {
+    if (!c.classList.contains("timeline-playhead")) c.remove();
+  });
 
   if (!phraseMap.length || !duration) {
     timelineWrap.classList.add("hidden");
@@ -244,11 +255,9 @@ function renderTimeline(phraseMap, duration) {
   }
   timelineWrap.classList.remove("hidden");
 
-  // Draw phrase blocks on the track
   phraseMap.forEach((phrase, idx) => {
     const startPct = (phrase.start_time / duration) * 100;
-    // Estimate end time: next phrase start or audio end
-    const endTime = (phraseMap[idx + 1]?.start_time) || duration;
+    const endTime = phrase.end_time || duration;
     const widthPct = Math.max(1, ((endTime - phrase.start_time) / duration) * 100);
 
     const block = document.createElement("div");
@@ -257,25 +266,24 @@ function renderTimeline(phraseMap, duration) {
     block.style.width = `${widthPct}%`;
     block.dataset.index = idx;
     block.title = phrase.text || `phrase ${idx + 1}`;
-
     block.addEventListener("click", () => {
       audioPreview.currentTime = phrase.start_time;
       audioPreview.play();
     });
-
     timelineTrack.appendChild(block);
 
-    // Phrase label below track
     const label = document.createElement("div");
     label.className = "timeline-phrase-label";
     label.style.left = `${startPct}%`;
     label.style.width = `${widthPct}%`;
-    label.innerHTML = `<span class="tl-time">${formatTime(phrase.start_time)}</span>` +
-      (phrase.text ? `<span class="tl-text">${escapeHtml(phrase.text)}</span>` : `<span class="tl-text muted">phrase ${idx + 1}</span>`);
+    label.innerHTML =
+      `<span class="tl-time">${formatTime(phrase.start_time)}</span>` +
+      (phrase.text
+        ? `<span class="tl-text">${escapeHtml(phrase.text)}</span>`
+        : `<span class="tl-text muted">phrase ${idx + 1}</span>`);
     timelinePhrases.appendChild(label);
   });
 
-  // Update playhead on audio timeupdate
   audioPreview.removeEventListener("timeupdate", onTimelineUpdate);
   audioPreview.addEventListener("timeupdate", onTimelineUpdate);
 }
@@ -285,15 +293,19 @@ function onTimelineUpdate() {
   const pct = (audioPreview.currentTime / audioDuration) * 100;
   timelinePlayhead.style.left = `${Math.min(pct, 100)}%`;
 
-  // Highlight the active phrase block
   const idx = getCurrentPhraseIndex(audioPreview.currentTime);
   document.querySelectorAll(".timeline-block").forEach((b, i) => {
     b.classList.toggle("active", i === idx);
   });
+
+  // Highlight corresponding transcript bar
+  document.querySelectorAll(".transcript-bar").forEach((b, i) => {
+    b.classList.toggle("bar-active", i === idx);
+  });
 }
 
 /* ══════════════════════════════════════
-   VERSION CARDS WITH KARAOKE SYNC
+   VERSION CARDS WITH WORD-LEVEL KARAOKE
    ══════════════════════════════════════ */
 function createVersionCard(version, isBest, phraseMap) {
   const card = document.createElement("div");
@@ -302,10 +314,14 @@ function createVersionCard(version, isBest, phraseMap) {
   const scorePercent = Math.round((version.score || 0) * 100);
   const lines = (version.lyrics || "").split("\n").filter((l) => l.trim());
 
-  // Build karaoke line HTML
-  const lyricsHtml = lines.map((line, i) =>
-    `<div class="lyric-line" data-line="${i}">${escapeHtml(line)}</div>`
-  ).join("");
+  // Build word-span lyric lines
+  const lyricsHtml = lines.map((line, lineIdx) => {
+    const words = line.trim().split(/\s+/);
+    const wordSpans = words.map((w, wi) =>
+      `<span class="lyric-word" data-line="${lineIdx}" data-word="${wi}">${escapeHtml(w)}</span>`
+    ).join(" ");
+    return `<div class="lyric-line" data-line="${lineIdx}">${wordSpans}</div>`;
+  }).join("");
 
   card.innerHTML = `
     <div class="version-header">
@@ -324,7 +340,6 @@ function createVersionCard(version, isBest, phraseMap) {
     </div>
   `;
 
-  // Copy button
   card.querySelector(".copy-btn").addEventListener("click", function () {
     navigator.clipboard.writeText(decodeURIComponent(this.dataset.lyrics)).then(() => {
       this.textContent = "✓ Copied!";
@@ -333,15 +348,10 @@ function createVersionCard(version, isBest, phraseMap) {
     });
   });
 
-  // Sync button
   const syncBtn = card.querySelector(".sync-btn");
   if (syncBtn) {
     syncBtn.addEventListener("click", () => {
-      if (activeSyncCard === card) {
-        stopSync();
-      } else {
-        startSync(card, syncBtn);
-      }
+      activeSyncCard === card ? stopSync() : startSync(card, syncBtn, lines, phraseMap);
     });
   }
 
@@ -349,37 +359,89 @@ function createVersionCard(version, isBest, phraseMap) {
 }
 
 /* ══════════════════════════════════════
-   KARAOKE SYNC
+   WORD-LEVEL KARAOKE SYNC
    ══════════════════════════════════════ */
-function startSync(card, btn) {
+function buildWordTimings(lines, phraseMap, totalDuration) {
+  /**
+   * For each lyric line (= one phrase), interpolate per-word timings
+   * by dividing the phrase duration evenly across its words.
+   */
+  const timings = [];
+
+  lines.forEach((line, lineIdx) => {
+    const phrase = phraseMap[lineIdx];
+    if (!phrase) return;
+
+    const phraseStart = phrase.start_time;
+    const phraseEnd = phrase.end_time || (phraseMap[lineIdx + 1]?.start_time) || totalDuration;
+    const phraseDuration = Math.max(0.1, phraseEnd - phraseStart);
+
+    const words = line.trim().split(/\s+/);
+    const wordDuration = phraseDuration / words.length;
+
+    words.forEach((_, wi) => {
+      timings.push({
+        lineIdx,
+        wordIdx: wi,
+        start: phraseStart + wi * wordDuration,
+        end: phraseStart + (wi + 1) * wordDuration,
+      });
+    });
+  });
+
+  return timings;
+}
+
+function startSync(card, btn, lines, phraseMap) {
   stopSync();
   activeSyncCard = card;
   btn.textContent = "■ Stop Sync";
   btn.classList.add("syncing");
 
+  // Build word-level timing map
+  activeWordTimings = buildWordTimings(lines, phraseMap, audioDuration);
+
   audioPreview.currentTime = 0;
   audioPreview.play();
 
   syncInterval = setInterval(() => {
-    const currentTime = audioPreview.currentTime;
-    const idx = getCurrentPhraseIndex(currentTime);
+    const t = audioPreview.currentTime;
 
-    card.querySelectorAll(".lyric-line").forEach((el, i) => {
-      el.classList.toggle("active-line", i === idx);
-      el.classList.toggle("past-line", i < idx);
+    // Find current word
+    let currentTiming = null;
+    for (const timing of activeWordTimings) {
+      if (t >= timing.start && t < timing.end) {
+        currentTiming = timing;
+        break;
+      }
+    }
+
+    // Apply highlights
+    card.querySelectorAll(".lyric-line").forEach((lineEl) => {
+      const li = parseInt(lineEl.dataset.line);
+      const isCurrentLine = currentTiming && li === currentTiming.lineIdx;
+      const isPastLine = currentTiming ? li < currentTiming.lineIdx : false;
+      lineEl.classList.toggle("past-line", isPastLine);
+      lineEl.classList.toggle("current-line", isCurrentLine);
     });
 
-    // Auto scroll to active line
-    const activeLine = card.querySelector(".lyric-line.active-line");
-    if (activeLine) {
-      activeLine.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
+    card.querySelectorAll(".lyric-word").forEach((wordEl) => {
+      const li = parseInt(wordEl.dataset.line);
+      const wi = parseInt(wordEl.dataset.word);
+      const isActive = currentTiming && li === currentTiming.lineIdx && wi === currentTiming.wordIdx;
+      const isPast = currentTiming
+        ? (li < currentTiming.lineIdx || (li === currentTiming.lineIdx && wi < currentTiming.wordIdx))
+        : false;
+      wordEl.classList.toggle("word-active", isActive);
+      wordEl.classList.toggle("word-past", isPast);
+    });
 
-    // Stop when audio ends
-    if (audioPreview.ended || audioPreview.paused) {
-      stopSync();
-    }
-  }, 100);
+    // Auto-scroll active line into view
+    const activeLine = card.querySelector(".lyric-line.current-line");
+    if (activeLine) activeLine.scrollIntoView({ block: "nearest", behavior: "smooth" });
+
+    if (audioPreview.ended || audioPreview.paused) stopSync();
+  }, 50); // 50ms for smooth word tracking
 
   audioPreview.addEventListener("ended", stopSync, { once: true });
 }
@@ -387,16 +449,16 @@ function startSync(card, btn) {
 function stopSync() {
   clearInterval(syncInterval);
   syncInterval = null;
+  activeWordTimings = [];
 
   if (activeSyncCard) {
-    activeSyncCard.querySelectorAll(".lyric-line").forEach((el) => {
-      el.classList.remove("active-line", "past-line");
+    activeSyncCard.querySelectorAll(".lyric-line, .lyric-word").forEach((el) => {
+      el.classList.remove("current-line", "past-line", "word-active", "word-past");
     });
     const btn = activeSyncCard.querySelector(".sync-btn");
     if (btn) { btn.textContent = "▶ Play Synced"; btn.classList.remove("syncing"); }
     activeSyncCard = null;
   }
-
   audioPreview.pause();
 }
 
@@ -421,8 +483,6 @@ function formatTime(seconds) {
 
 function escapeHtml(str) {
   return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
