@@ -1,3 +1,4 @@
+import re
 import os
 import anthropic
 
@@ -27,12 +28,12 @@ STYLE_VARIANTS = [
     {
         "name": "melodic",
         "label": "Melodic Version",
-        "description": "smooth, sung, flowing — built to be sung over a melody",
+        "description": "smooth and singable — built to float over a melody",
     },
     {
         "name": "rap",
         "label": "Rap Version",
-        "description": "bars, cadence, rhythm-locked — built to be rapped",
+        "description": "bars and cadence — built to be rapped, rhythm-locked",
     },
     {
         "name": "punchy",
@@ -44,12 +45,30 @@ STYLE_VARIANTS = [
 
 def _build_system_prompt() -> str:
     return (
-        "You are an elite ghostwriter and lyricist who has written for top artists across hip-hop, "
-        "R&B, pop, and trap. You specialize in taking raw mumble recordings and rough transcriptions "
-        "and turning them into polished, authentic lyrics that preserve the artist's original cadence, "
-        "energy, and intent. You understand syllable matching, flow, rhyme schemes, and emotional tone. "
-        "You never write generic lyrics — you write lyrics that sound like THAT artist, for THAT moment."
+        "You are an elite ghostwriter and lyricist. You specialize in taking raw mumble "
+        "recordings and turning them into polished lyrics that preserve the artist's exact "
+        "cadence, rhythm, and emotional intent. "
+        "You match syllables precisely — each line you write must have the SAME syllable "
+        "count as the original line. You keep the emotional core and key sounds of the "
+        "original. You never write generic lyrics. You write for THAT artist, THAT moment."
     )
+
+
+def _build_phrase_template(phrase_map: list) -> str:
+    """
+    Build a line-by-line template string like:
+      Line 1: "ion kno bout"  →  4 syllables
+      Line 2: "da pain yeah yeah"  →  4 syllables
+    """
+    if not phrase_map:
+        return ""
+
+    lines = []
+    for i, phrase in enumerate(phrase_map, 1):
+        lines.append(
+            f'  Line {i}: "{phrase["text"]}"  →  {phrase["syllables"]} syllables'
+        )
+    return "\n".join(lines)
 
 
 def _build_user_prompt(
@@ -64,42 +83,36 @@ def _build_user_prompt(
     mode_desc = STYLE_DESCRIPTIONS["mode"].get(mode, mode)
     vibe_desc = STYLE_DESCRIPTIONS["vibe"].get(vibe, vibe)
 
-    rhythm_str = flow_data.get("rhythm_string", "")
     tempo = flow_data.get("tempo_bpm", "unknown")
-    syllable_count = flow_data.get("syllable_count", "unknown")
     flow_style = flow_data.get("flow_style", "mixed")
+    phrase_map = flow_data.get("phrase_map", [])
+    phrase_template = _build_phrase_template(phrase_map)
 
-    prompt = f"""Here is a raw mumble/vocal recording transcription from an artist:
+    prompt = f"""Here is a raw mumble/vocal recording from an artist.
 
-ROUGH TRANSCRIPTION:
+FULL ROUGH TRANSCRIPTION:
 "{rough_text}"
 
-FLOW ANALYSIS:
-- Detected tempo: {tempo} BPM
-- Flow style: {flow_style}
-- Estimated syllables: {syllable_count}
-"""
+TEMPO: {tempo:.0f if isinstance(tempo, float) else tempo} BPM  |  FLOW STYLE: {flow_style}
 
-    if rhythm_str:
-        prompt += f"- Rhythm pattern: {rhythm_str}\n"
+LINE-BY-LINE BREAKDOWN (each line = a natural phrase from the recording):
+{phrase_template if phrase_template else '  (no phrase data — use the full transcription)'}
 
-    prompt += f"""
 STYLE SETTINGS:
 - Tone: {tone} → {tone_desc}
 - Mode: {mode} → {mode_desc}
 - Vibe: {vibe} → {vibe_desc}
 
-YOUR TASK:
-Write the **{variant['label']}** — {variant['description']}
+YOUR TASK — Write the **{variant["label"]}** ({variant["description"]}):
 
-Rules:
-1. Match the syllable count and rhythm of the original recording as closely as possible
-2. Keep the emotional core/meaning of the rough transcription
-3. The lyrics must feel AUTHENTIC to the artist, not like generic AI writing
-4. Match the {mode} format strictly
-5. Do NOT add labels, headers, or explanations — output ONLY the lyrics
-6. Keep rhyme schemes natural — don't force rhymes at the cost of meaning
-7. The energy should match: {vibe_desc}
+RULES (follow these exactly):
+1. Write one output line for EVERY line in the breakdown above — same number of lines, same order
+2. Each output line MUST match the syllable count of the original line (±1 syllable max)
+3. Keep words or sounds from the original where they fit — don't throw everything away
+4. Preserve the emotional meaning and feel of each original line
+5. Make rhymes happen naturally — never sacrifice flow or meaning to force a rhyme
+6. Tone/vibe must match: {vibe_desc}
+7. Output ONLY the lyrics — no labels, no explanations, no line numbers
 
 Write the lyrics now:"""
 
@@ -115,7 +128,7 @@ def generate_lyrics(
 ) -> list[dict]:
     """
     Generate 3 lyric versions (melodic, rap, punchy) for the given input.
-    Returns a list of dicts with name, label, and lyrics.
+    Returns a list of dicts with name, label, lyrics, and score.
     """
     results = []
 
@@ -137,36 +150,50 @@ def generate_lyrics(
             "score": _score_lyrics(lyrics, flow_data),
         })
 
-    # Sort by score descending
     results.sort(key=lambda x: x["score"], reverse=True)
-
     return results
+
+
+def _count_syllables(word: str) -> int:
+    word = re.sub(r"[^a-z]", "", word.lower())
+    if not word:
+        return 0
+    count = len(re.findall(r"[aeiouy]+", word))
+    if word.endswith("e") and count > 1:
+        count -= 1
+    return max(1, count)
 
 
 def _score_lyrics(lyrics: str, flow_data: dict) -> float:
     """
-    Simple heuristic scoring:
-    - Syllable match (closer to original = better)
-    - Line count (reasonable for mode)
+    Score lyrics on:
+    - Syllable match vs original phrases (line by line)
     - Rhyme density
     """
     lines = [l for l in lyrics.split("\n") if l.strip()]
     if not lines:
         return 0.0
 
-    # Count syllables roughly (vowel groups)
-    import re
-    def count_syllables(text):
-        return len(re.findall(r"[aeiouAEIOU]+", text))
+    phrase_map = flow_data.get("phrase_map", [])
 
-    total_syllables = count_syllables(lyrics)
-    target_syllables = flow_data.get("syllable_count", total_syllables)
+    # Syllable match score — compare line by line
+    syllable_score = 0.0
+    if phrase_map and lines:
+        pairs = min(len(lines), len(phrase_map))
+        diffs = []
+        for i in range(pairs):
+            target = phrase_map[i]["syllables"]
+            actual = sum(_count_syllables(w) for w in lines[i].split())
+            diff = abs(target - actual)
+            diffs.append(max(0, 1 - diff / max(target, 1)))
+        syllable_score = sum(diffs) / pairs if diffs else 0.5
+    else:
+        syllable_score = 0.5
 
-    syllable_diff = abs(total_syllables - target_syllables)
-    syllable_score = max(0, 1 - (syllable_diff / max(target_syllables, 1)))
-
-    # Rhyme score: check last words of lines
-    last_words = [l.strip().split()[-1].lower().rstrip(".,!?") for l in lines if l.strip().split()]
+    # Rhyme score — check last words of adjacent lines
+    last_words = [
+        l.strip().split()[-1].lower().rstrip(".,!?") for l in lines if l.strip().split()
+    ]
     rhyme_pairs = 0
     for i in range(len(last_words) - 1):
         a, b = last_words[i], last_words[i + 1]
@@ -174,4 +201,4 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> float:
             rhyme_pairs += 1
     rhyme_score = min(1.0, rhyme_pairs / max(len(lines) / 2, 1))
 
-    return round((syllable_score * 0.6 + rhyme_score * 0.4), 3)
+    return round(syllable_score * 0.7 + rhyme_score * 0.3, 3)

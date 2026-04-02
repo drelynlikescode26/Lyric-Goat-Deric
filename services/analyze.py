@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import librosa
 
@@ -29,8 +30,11 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
     avg_centroid = float(np.mean(spectral_centroid))
 
-    # Estimate syllable count from onsets
-    estimated_syllables = len(onset_times)
+    # Detect natural phrase breaks from word timing gaps
+    phrases = _detect_phrases(word_timestamps, gap_threshold=0.4)
+
+    # Build phrase map with syllable counts per line
+    phrase_map = _build_phrase_map(phrases, beat_times)
 
     # Build flow map from word timestamps
     flow_map = _build_flow_map(word_timestamps, beat_times)
@@ -41,12 +45,79 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     return {
         "tempo_bpm": tempo,
         "beat_count": len(beat_times),
-        "syllable_count": estimated_syllables,
+        "syllable_count": len(onset_times),
         "energy_ratio": round(energy_ratio, 3),
         "flow_style": flow_style,
         "flow_map": flow_map,
+        "phrase_map": phrase_map,
         "avg_words_per_beat": _words_per_beat(word_timestamps, beat_times),
     }
+
+
+def _count_syllables(word: str) -> int:
+    """Estimate syllable count for a single word."""
+    word = re.sub(r"[^a-z]", "", word.lower())
+    if not word:
+        return 0
+    count = len(re.findall(r"[aeiouy]+", word))
+    # Silent trailing e (e.g. "make", "time")
+    if word.endswith("e") and count > 1:
+        count -= 1
+    return max(1, count)
+
+
+def _detect_phrases(word_timestamps: list, gap_threshold: float = 0.4) -> list:
+    """
+    Split word timestamps into natural phrases based on pauses.
+    A gap longer than gap_threshold seconds = new phrase (new lyric line).
+    """
+    if not word_timestamps:
+        return []
+
+    phrases = []
+    current = [word_timestamps[0]]
+
+    for i in range(1, len(word_timestamps)):
+        prev_end = word_timestamps[i - 1].get("end", word_timestamps[i - 1].get("start", 0))
+        curr_start = word_timestamps[i].get("start", 0)
+        if curr_start - prev_end > gap_threshold:
+            phrases.append(current)
+            current = [word_timestamps[i]]
+        else:
+            current.append(word_timestamps[i])
+
+    if current:
+        phrases.append(current)
+
+    return phrases
+
+
+def _build_phrase_map(phrases: list, beat_times: np.ndarray) -> list:
+    """
+    Build a line-by-line template: original words, syllable count, beat position.
+    This is the key structure the lyric generator uses to match lines.
+    """
+    phrase_map = []
+    for phrase in phrases:
+        words = [w["word"] for w in phrase]
+        text = " ".join(words)
+        syllables = sum(_count_syllables(w) for w in words)
+        start_time = phrase[0].get("start", 0)
+
+        # Find which beat this phrase starts on
+        beat_idx = 0
+        if len(beat_times) > 0:
+            beat_idx = int(np.argmin(np.abs(beat_times - start_time)))
+
+        phrase_map.append({
+            "text": text,
+            "words": words,
+            "syllables": syllables,
+            "start_time": round(start_time, 2),
+            "beat_index": beat_idx,
+        })
+
+    return phrase_map
 
 
 def _build_flow_map(word_timestamps: list, beat_times: np.ndarray) -> list:
@@ -57,7 +128,6 @@ def _build_flow_map(word_timestamps: list, beat_times: np.ndarray) -> list:
     flow_map = []
     for w in word_timestamps:
         word_time = w.get("start", 0)
-        # Find nearest beat
         nearest_beat_idx = int(np.argmin(np.abs(beat_times - word_time)))
         beat_offset = word_time - float(beat_times[nearest_beat_idx])
         flow_map.append({
@@ -83,25 +153,16 @@ def _classify_flow(
     spectral_centroid: float,
     word_timestamps: list,
 ) -> str:
-    """Classify the overall flow style based on audio features."""
-    # High tempo + high energy = aggressive/rap
     if tempo > 130 and energy_ratio > 0.5:
         return "rap"
-    # Slower tempo + lower energy = melodic/sung
     if tempo < 100 and energy_ratio < 0.4:
         return "melodic"
-    # Mid tempo, dense syllables = trap/rhythmic
     if 90 <= tempo <= 140 and len(word_timestamps) > 10:
         return "rhythmic"
     return "mixed"
 
 
 def syllable_rhythm_string(flow_map: list) -> str:
-    """
-    Convert flow map into a readable rhythm string like:
-    [beat1: word1 word2] [beat2: word3] ...
-    Useful for feeding into the prompt.
-    """
     if not flow_map:
         return ""
 
