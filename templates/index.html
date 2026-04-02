@@ -23,10 +23,11 @@
       <div class="record-zone">
         <button id="recordBtn" class="btn btn-record" type="button">
           <span class="mic-icon">🎙</span>
-          <span id="recordLabel">Hold to Record</span>
+          <span id="recordLabel">Start Recording</span>
         </button>
         <div id="recordingStatus" class="recording-status hidden">
-          <span class="pulse-dot"></span> Recording...
+          <span class="pulse-dot"></span> Recording
+          <span id="recordTimer" class="record-timer">00:00</span>
         </div>
         <audio id="audioPreview" class="audio-preview hidden" controls></audio>
       </div>

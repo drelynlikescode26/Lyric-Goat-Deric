@@ -4,6 +4,8 @@ let audioChunks = [];
 let recordedBlob = null;
 let uploadedFile = null;
 let isRecording = false;
+let timerInterval = null;
+let recordingSeconds = 0;
 
 const state = {
   tone: "melodic",
@@ -15,6 +17,7 @@ const state = {
 const recordBtn = document.getElementById("recordBtn");
 const recordLabel = document.getElementById("recordLabel");
 const recordingStatus = document.getElementById("recordingStatus");
+const recordTimer = document.getElementById("recordTimer");
 const audioPreview = document.getElementById("audioPreview");
 const fileInput = document.getElementById("fileInput");
 const uploadText = document.getElementById("uploadText");
@@ -27,15 +30,16 @@ const roughText = document.getElementById("roughText");
 const flowStats = document.getElementById("flowStats");
 const versionsContainer = document.getElementById("versionsContainer");
 
-/* ── Recording ── */
-recordBtn.addEventListener("mousedown", startRecording);
-recordBtn.addEventListener("touchstart", (e) => { e.preventDefault(); startRecording(); });
-recordBtn.addEventListener("mouseup", stopRecording);
-recordBtn.addEventListener("mouseleave", () => { if (isRecording) stopRecording(); });
-recordBtn.addEventListener("touchend", stopRecording);
+/* ── Recording — click to start, click to stop ── */
+recordBtn.addEventListener("click", () => {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+});
 
 async function startRecording() {
-  if (isRecording) return;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
@@ -53,8 +57,10 @@ async function startRecording() {
       const url = URL.createObjectURL(recordedBlob);
       audioPreview.src = url;
       audioPreview.classList.remove("hidden");
+      recordBtn.classList.remove("recording");
       recordBtn.classList.add("has-audio");
-      recordLabel.textContent = "Re-record";
+      recordLabel.textContent = "Record Again";
+      recordingStatus.classList.add("hidden");
       uploadText.textContent = "Upload Audio File";
       uploadLabel.classList.remove("has-file");
 
@@ -64,10 +70,17 @@ async function startRecording() {
 
     mediaRecorder.start();
     isRecording = true;
+    recordedBlob = null;
     recordBtn.classList.remove("has-audio");
     recordBtn.classList.add("recording");
-    recordLabel.textContent = "Release to Stop";
+    recordLabel.textContent = "Stop Recording";
     recordingStatus.classList.remove("hidden");
+
+    // Start timer
+    recordingSeconds = 0;
+    updateTimer();
+    timerInterval = setInterval(updateTimer, 1000);
+
   } catch (err) {
     alert("Microphone access denied. Please allow mic access and try again.");
   }
@@ -77,8 +90,15 @@ function stopRecording() {
   if (!isRecording || !mediaRecorder) return;
   mediaRecorder.stop();
   isRecording = false;
-  recordBtn.classList.remove("recording");
-  recordingStatus.classList.add("hidden");
+  clearInterval(timerInterval);
+  timerInterval = null;
+}
+
+function updateTimer() {
+  const m = Math.floor(recordingSeconds / 60).toString().padStart(2, "0");
+  const s = (recordingSeconds % 60).toString().padStart(2, "0");
+  recordTimer.textContent = `${m}:${s}`;
+  recordingSeconds++;
 }
 
 function getSupportedMimeType() {
@@ -98,12 +118,11 @@ fileInput.addEventListener("change", () => {
   uploadText.textContent = `✓ ${file.name}`;
   uploadLabel.classList.add("has-file");
 
-  // Show preview
   const url = URL.createObjectURL(file);
   audioPreview.src = url;
   audioPreview.classList.remove("hidden");
   recordBtn.classList.remove("has-audio", "recording");
-  recordLabel.textContent = "Hold to Record";
+  recordLabel.textContent = "Start Recording";
 
   checkReady();
 });
@@ -178,25 +197,22 @@ function setGenerating(loading) {
 function renderResults(data) {
   resultsSection.classList.remove("hidden");
 
-  // Rough text
-  roughText.textContent = data.rough_text || "";
+  roughText.textContent = data.rough_text || "(melody only — no words detected)";
 
-  // Flow stats
   const flow = data.flow || {};
+  const modeLabel = data.melody_mode ? ' · <strong style="color:#a78bfa">melody mode</strong>' : "";
   flowStats.innerHTML = [
     flow.tempo_bpm ? `<div class="stat-chip"><strong>${Math.round(flow.tempo_bpm)}</strong> BPM</div>` : "",
     flow.flow_style ? `<div class="stat-chip">Flow: <strong>${flow.flow_style}</strong></div>` : "",
     flow.syllable_count ? `<div class="stat-chip"><strong>~${flow.syllable_count}</strong> syllables</div>` : "",
-  ].join("");
+  ].join("") + (data.melody_mode ? `<div class="stat-chip" style="border-color:#7c3aed;color:#a78bfa"><strong>melody mode</strong></div>` : "");
 
-  // Versions
   versionsContainer.innerHTML = "";
   (data.versions || []).forEach((v, idx) => {
     const card = createVersionCard(v, idx === 0);
     versionsContainer.appendChild(card);
   });
 
-  // Scroll to results
   setTimeout(() => resultsSection.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
 }
 

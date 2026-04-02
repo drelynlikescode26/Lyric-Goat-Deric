@@ -34,13 +34,19 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     phrases = _detect_phrases(word_timestamps, gap_threshold=0.4)
 
     # Build phrase map with syllable counts per line
-    phrase_map = _build_phrase_map(phrases, beat_times)
+    # If no real words detected (melody-only mumble), fall back to onset-based phrases
+    if phrases:
+        phrase_map = _build_phrase_map(phrases, beat_times)
+    else:
+        phrase_map = _build_melody_phrase_map(onset_times, beat_times)
 
     # Build flow map from word timestamps
     flow_map = _build_flow_map(word_timestamps, beat_times)
 
     # Classify flow style
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
+
+    melody_mode = len(word_timestamps) < 3
 
     return {
         "tempo_bpm": tempo,
@@ -50,6 +56,7 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
         "flow_style": flow_style,
         "flow_map": flow_map,
         "phrase_map": phrase_map,
+        "melody_mode": melody_mode,
         "avg_words_per_beat": _words_per_beat(word_timestamps, beat_times),
     }
 
@@ -113,6 +120,46 @@ def _build_phrase_map(phrases: list, beat_times: np.ndarray) -> list:
             "text": text,
             "words": words,
             "syllables": syllables,
+            "start_time": round(start_time, 2),
+            "beat_index": beat_idx,
+        })
+
+    return phrase_map
+
+
+def _build_melody_phrase_map(onset_times: np.ndarray, beat_times: np.ndarray) -> list:
+    """
+    When no words are detected (pure melody/hum), build a phrase map from
+    onset clustering. Groups onsets into phrases using silence gaps, then
+    assigns a syllable count equal to the number of onsets per phrase.
+    """
+    if len(onset_times) == 0:
+        return []
+
+    # Group onsets into phrases by silence gaps > 0.5s
+    phrases = []
+    current = [float(onset_times[0])]
+    for i in range(1, len(onset_times)):
+        gap = float(onset_times[i]) - float(onset_times[i - 1])
+        if gap > 0.5:
+            phrases.append(current)
+            current = [float(onset_times[i])]
+        else:
+            current.append(float(onset_times[i]))
+    if current:
+        phrases.append(current)
+
+    phrase_map = []
+    for phrase in phrases:
+        syllable_count = len(phrase)
+        start_time = phrase[0]
+        beat_idx = 0
+        if len(beat_times) > 0:
+            beat_idx = int(np.argmin(np.abs(beat_times - start_time)))
+        phrase_map.append({
+            "text": "",           # no words — melody only
+            "words": [],
+            "syllables": syllable_count,
             "start_time": round(start_time, 2),
             "beat_index": beat_idx,
         })

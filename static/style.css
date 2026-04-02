@@ -153,6 +153,13 @@ body {
   animation: blink 0.8s infinite;
 }
 
+.record-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin-left: 4px;
+  color: var(--red);
+}
+
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }

@@ -90,6 +90,7 @@ def process():
         return jsonify({
             "success": True,
             "rough_text": rough_text,
+            "melody_mode": flow_data.get("melody_mode", False),
             "flow": {
                 "tempo_bpm": flow_data["tempo_bpm"],
                 "flow_style": flow_data["flow_style"],

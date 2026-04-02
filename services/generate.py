@@ -54,20 +54,22 @@ def _build_system_prompt() -> str:
     )
 
 
-def _build_phrase_template(phrase_map: list) -> str:
+def _build_phrase_template(phrase_map: list, melody_mode: bool = False) -> str:
     """
-    Build a line-by-line template string like:
-      Line 1: "ion kno bout"  →  4 syllables
-      Line 2: "da pain yeah yeah"  →  4 syllables
+    Build a line-by-line template string.
+    In melody mode, shows syllable counts only (no source words).
     """
     if not phrase_map:
         return ""
 
     lines = []
     for i, phrase in enumerate(phrase_map, 1):
-        lines.append(
-            f'  Line {i}: "{phrase["text"]}"  →  {phrase["syllables"]} syllables'
-        )
+        if melody_mode or not phrase["text"]:
+            lines.append(f"  Line {i}: (melody phrase)  →  {phrase['syllables']} syllables")
+        else:
+            lines.append(
+                f'  Line {i}: "{phrase["text"]}"  →  {phrase["syllables"]} syllables'
+            )
     return "\n".join(lines)
 
 
@@ -86,17 +88,48 @@ def _build_user_prompt(
     tempo = flow_data.get("tempo_bpm", "unknown")
     flow_style = flow_data.get("flow_style", "mixed")
     phrase_map = flow_data.get("phrase_map", [])
-    phrase_template = _build_phrase_template(phrase_map)
+    melody_mode = flow_data.get("melody_mode", False)
+    phrase_template = _build_phrase_template(phrase_map, melody_mode=melody_mode)
 
-    prompt = f"""Here is a raw mumble/vocal recording from an artist.
+    if melody_mode:
+        input_block = f"""INPUT TYPE: Pure melody/hum — no words detected
+The artist hummed a melody. There are no source words to preserve.
+Your only constraints are the rhythm template below.
 
-FULL ROUGH TRANSCRIPTION:
+TEMPO: {tempo:.0f if isinstance(tempo, float) else tempo} BPM  |  FLOW STYLE: {flow_style}
+
+MELODY RHYTHM TEMPLATE (syllable count per phrase):
+{phrase_template if phrase_template else "  (no phrase data — use your judgment)"}"""
+        rules = """RULES (follow these exactly):
+1. Write one output line for EVERY phrase in the rhythm template
+2. Each line MUST match the syllable count shown (±1 syllable max)
+3. Write original, vivid lyrics that fit the tempo and vibe — no filler words
+4. The lyrics should feel like they were MADE for this melody
+5. Make rhymes happen naturally — never sacrifice meaning to force a rhyme
+6. Tone/vibe must match: {vibe_desc}
+7. Output ONLY the lyrics — no labels, no explanations, no line numbers"""
+    else:
+        input_block = f"""FULL ROUGH TRANSCRIPTION:
 "{rough_text}"
 
 TEMPO: {tempo:.0f if isinstance(tempo, float) else tempo} BPM  |  FLOW STYLE: {flow_style}
 
 LINE-BY-LINE BREAKDOWN (each line = a natural phrase from the recording):
-{phrase_template if phrase_template else '  (no phrase data — use the full transcription)'}
+{phrase_template if phrase_template else '  (no phrase data — use the full transcription)'}"""
+        rules = """RULES (follow these exactly):
+1. Write one output line for EVERY line in the breakdown — same number of lines, same order
+2. Each output line MUST match the syllable count of the original line (±1 syllable max)
+3. Keep words or sounds from the original where they fit — don't throw everything away
+4. Preserve the emotional meaning and feel of each original line
+5. Make rhymes happen naturally — never sacrifice flow or meaning to force a rhyme
+6. Tone/vibe must match: {vibe_desc}
+7. Output ONLY the lyrics — no labels, no explanations, no line numbers"""
+
+    rules = rules.format(vibe_desc=vibe_desc)
+
+    prompt = f"""Here is a raw vocal recording from an artist.
+
+{input_block}
 
 STYLE SETTINGS:
 - Tone: {tone} → {tone_desc}
@@ -105,14 +138,7 @@ STYLE SETTINGS:
 
 YOUR TASK — Write the **{variant["label"]}** ({variant["description"]}):
 
-RULES (follow these exactly):
-1. Write one output line for EVERY line in the breakdown above — same number of lines, same order
-2. Each output line MUST match the syllable count of the original line (±1 syllable max)
-3. Keep words or sounds from the original where they fit — don't throw everything away
-4. Preserve the emotional meaning and feel of each original line
-5. Make rhymes happen naturally — never sacrifice flow or meaning to force a rhyme
-6. Tone/vibe must match: {vibe_desc}
-7. Output ONLY the lyrics — no labels, no explanations, no line numbers
+{rules}
 
 Write the lyrics now:"""
 
