@@ -1,9 +1,21 @@
 import re
+from collections import Counter
 import numpy as np
 import librosa
 
-# Max syllables per bar — phrases longer than this get split at word boundaries
 MAX_SYLLABLES_PER_BAR = 10
+
+CHROMATIC_KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+# Vowel family triggers — words/sounds that indicate dominant vowel shape
+VOWEL_FAMILIES = {
+    "ayy": ["ayy", "ay", "aye", "way", "say", "hey", "they", "yeah", "make", "take", "day"],
+    "oh":  ["oh", "ooh", "woah", "no", "so", "go", "though", "low", "hold", "cold", "soul"],
+    "ee":  ["ee", "free", "me", "be", "see", "feel", "need", "real", "deep", "sleep", "breathe"],
+    "ah":  ["ah", "yah", "nah", "ma", "la", "aah", "heart", "dark", "hard", "far", "star"],
+    "uh":  ["uh", "huh", "up", "love", "blood", "rough", "stuck", "cut", "run", "done"],
+    "ii":  ["ii", "lie", "cry", "fly", "try", "die", "high", "mind", "time", "right", "night"],
+}
 
 
 def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
@@ -24,7 +36,14 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
     avg_centroid = float(np.mean(spectral_centroid))
 
-    # Detect phrases by silence gaps, then enforce bar length limit
+    # Detect musical key via chromagram
+    detected_key = _detect_key(y, sr)
+
+    # Detect vowel patterns and repetition from word timestamps
+    all_words = [w["word"] for w in word_timestamps]
+    vowel_data = _detect_vowel_patterns(all_words)
+
+    # Phrase detection + bar length enforcement
     raw_phrases = _detect_phrases(word_timestamps, gap_threshold=0.4)
     phrases = _split_long_phrases(raw_phrases, max_syllables=MAX_SYLLABLES_PER_BAR)
 
@@ -35,13 +54,14 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
 
     duration = round(float(len(y) / sr), 2)
 
-    # Ensure the last phrase has a valid end_time fallback
     if phrase_map and phrase_map[-1].get("end_time", 0) <= phrase_map[-1]["start_time"]:
         phrase_map[-1]["end_time"] = duration
 
     flow_map = _build_flow_map(word_timestamps, beat_times)
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
-    melody_mode = len(word_timestamps) < 3
+
+    # Use melody mode if very few real words OR transcript is just repetitions
+    melody_mode = len(word_timestamps) < 3 or vowel_data["is_repetitive"]
 
     return {
         "tempo_bpm": tempo,
@@ -54,6 +74,51 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
         "melody_mode": melody_mode,
         "duration": duration,
         "avg_words_per_beat": _words_per_beat(word_timestamps, beat_times),
+        "detected_key": detected_key,
+        "vowel_family": vowel_data["vowel_family"],
+        "is_repetitive": vowel_data["is_repetitive"],
+    }
+
+
+def _detect_key(y: np.ndarray, sr: int) -> str:
+    """Detect musical key using chromagram — most prominent pitch class."""
+    try:
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        chroma_mean = np.mean(chroma, axis=1)
+        key_idx = int(np.argmax(chroma_mean))
+        return CHROMATIC_KEYS[key_idx]
+    except Exception:
+        return "C"
+
+
+def _detect_vowel_patterns(words: list) -> dict:
+    """
+    Analyze transcript words for dominant vowel family and repetition.
+    Returns vowel_family (str|None) and is_repetitive (bool).
+    """
+    if not words:
+        return {"vowel_family": None, "is_repetitive": False}
+
+    word_list = [w.lower().strip(".,!?") for w in words]
+
+    # Repetition: most common word is >40% of total
+    counts = Counter(word_list)
+    most_common_count = counts.most_common(1)[0][1]
+    is_repetitive = most_common_count / len(word_list) > 0.4
+
+    # Find dominant vowel family
+    all_text = " ".join(word_list)
+    best_family = None
+    best_score = 0
+    for family, triggers in VOWEL_FAMILIES.items():
+        score = sum(1 for t in triggers if t in all_text)
+        if score > best_score:
+            best_score = score
+            best_family = family
+
+    return {
+        "vowel_family": best_family if best_score > 0 else None,
+        "is_repetitive": is_repetitive,
     }
 
 
@@ -90,10 +155,6 @@ def _detect_phrases(word_timestamps: list, gap_threshold: float = 0.4) -> list:
 
 
 def _split_long_phrases(phrases: list, max_syllables: int = MAX_SYLLABLES_PER_BAR) -> list:
-    """
-    If a phrase has more syllables than max_syllables, split it at word
-    boundaries so no bar is too long. Preserves original word timestamps.
-    """
     result = []
     for phrase in phrases:
         total_syls = sum(_count_syllables(w["word"]) for w in phrase)
@@ -101,15 +162,12 @@ def _split_long_phrases(phrases: list, max_syllables: int = MAX_SYLLABLES_PER_BA
             result.append(phrase)
             continue
 
-        # Split into sub-bars at word boundaries
-        current_bar = []
-        current_syls = 0
+        current_bar, current_syls = [], 0
         for word in phrase:
             w_syls = _count_syllables(word["word"])
             if current_syls + w_syls > max_syllables and current_bar:
                 result.append(current_bar)
-                current_bar = [word]
-                current_syls = w_syls
+                current_bar, current_syls = [word], w_syls
             else:
                 current_bar.append(word)
                 current_syls += w_syls
@@ -148,11 +206,9 @@ def _build_melody_phrase_map(onset_times: np.ndarray, beat_times: np.ndarray) ->
     if len(onset_times) == 0:
         return []
 
-    phrases = []
-    current = [float(onset_times[0])]
+    phrases, current = [], [float(onset_times[0])]
     for i in range(1, len(onset_times)):
-        gap = float(onset_times[i]) - float(onset_times[i - 1])
-        if gap > 0.5:
+        if float(onset_times[i]) - float(onset_times[i - 1]) > 0.5:
             phrases.append(current)
             current = [float(onset_times[i])]
         else:
@@ -160,7 +216,6 @@ def _build_melody_phrase_map(onset_times: np.ndarray, beat_times: np.ndarray) ->
     if current:
         phrases.append(current)
 
-    # Also enforce bar length on melody phrases (cap at MAX_SYLLABLES_PER_BAR onsets)
     capped = []
     for phrase in phrases:
         while len(phrase) > MAX_SYLLABLES_PER_BAR:
@@ -177,8 +232,7 @@ def _build_melody_phrase_map(onset_times: np.ndarray, beat_times: np.ndarray) ->
         if len(beat_times) > 0:
             beat_idx = int(np.argmin(np.abs(beat_times - start_time)))
         phrase_map.append({
-            "text": "",
-            "words": [],
+            "text": "", "words": [],
             "syllables": len(phrase),
             "start_time": round(start_time, 2),
             "end_time": round(end_time, 2),
@@ -229,9 +283,5 @@ def syllable_rhythm_string(flow_map: list) -> str:
         return ""
     beats: dict = {}
     for entry in flow_map:
-        bi = entry["beat_index"]
-        beats.setdefault(bi, []).append(entry["word"])
-    parts = []
-    for bi in sorted(beats.keys()):
-        parts.append(f"[beat {bi + 1}: {' '.join(beats[bi])}]")
-    return " ".join(parts)
+        beats.setdefault(entry["beat_index"], []).append(entry["word"])
+    return " ".join(f"[beat {bi+1}: {' '.join(beats[bi])}]" for bi in sorted(beats.keys()))

@@ -11,23 +11,38 @@ let currentPhraseMap = [];
 let audioDuration = 0;
 let syncInterval = null;
 let activeSyncCard = null;
+let currentRoughText = "";
+let currentFlowData = {};
 
-const state = { tone: "melodic", mode: "verse", vibe: "introspective" };
+// Per-version lock state: { versionName: { lineIdx: lockedText } }
+let lockedLines = {};
+
+const state = {
+  tone: "melodic",
+  mode: "verse",
+  vibe: "introspective",
+  gen_mode: "cadence",
+  key: "auto",
+  keyQuality: "major",
+};
 
 /* ── DOM refs ── */
-const recordBtn        = document.getElementById("recordBtn");
-const recordLabel      = document.getElementById("recordLabel");
-const recordingStatus  = document.getElementById("recordingStatus");
-const recordTimer      = document.getElementById("recordTimer");
-const audioPreview     = document.getElementById("audioPreview");
-const fileInput        = document.getElementById("fileInput");
-const uploadText       = document.getElementById("uploadText");
-const uploadLabel      = document.querySelector(".upload-label");
-const generateBtn      = document.getElementById("generateBtn");
-const generateLabel    = document.getElementById("generateLabel");
-const generateSpinner  = document.getElementById("generateSpinner");
-const resultsSection   = document.getElementById("resultsSection");
-const roughTextEl      = document.getElementById("roughText");
+const recordBtn          = document.getElementById("recordBtn");
+const recordLabel        = document.getElementById("recordLabel");
+const recordingStatus    = document.getElementById("recordingStatus");
+const recordTimer        = document.getElementById("recordTimer");
+const audioPreview       = document.getElementById("audioPreview");
+const fileInput          = document.getElementById("fileInput");
+const uploadText         = document.getElementById("uploadText");
+const uploadLabel        = document.querySelector(".upload-label");
+const generateBtn        = document.getElementById("generateBtn");
+const generateLabel      = document.getElementById("generateLabel");
+const generateSpinner    = document.getElementById("generateSpinner");
+const resultsSection     = document.getElementById("resultsSection");
+const roughTextEl        = document.getElementById("roughText");
+const analysisChipsEl    = document.getElementById("analysisChips");
+const detectedKeyBadge   = document.getElementById("detectedKeyBadge");
+const repetitiveBadge    = document.getElementById("repetitiveBadge");
 const flowStats        = document.getElementById("flowStats");
 const versionsContainer = document.getElementById("versionsContainer");
 const timelineWrap     = document.getElementById("timelineWrap");
@@ -261,6 +276,25 @@ document.querySelectorAll(".pill-group").forEach((group) => {
   });
 });
 
+/* ══════════════════
+   KEY SELECTOR
+   ══════════════════ */
+document.querySelectorAll(".key-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".key-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.key = btn.dataset.key;
+  });
+});
+
+document.querySelectorAll(".key-quality-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".key-quality-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.keyQuality = btn.dataset.quality;
+  });
+});
+
 function checkReady() { generateBtn.disabled = !(recordedBlob || uploadedFile); }
 
 /* ══════════════════
@@ -279,6 +313,9 @@ generateBtn.addEventListener("click", async () => {
   formData.append("tone", state.tone);
   formData.append("mode", state.mode);
   formData.append("vibe", state.vibe);
+  formData.append("gen_mode", state.gen_mode);
+  const keyValue = state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto";
+  formData.append("key", keyValue);
 
   try {
     const res = await fetch("/process", { method: "POST", body: formData });
@@ -305,15 +342,41 @@ function setGenerating(loading) {
 function renderResults(data) {
   stopSync();
   resultsSection.classList.remove("hidden");
+  lockedLines = {};
 
   currentPhraseMap = data.phrase_map || [];
   audioDuration = data.flow?.duration || 0;
+  currentRoughText = data.rough_text || "";
+  currentFlowData = {
+    phrase_map: currentPhraseMap,
+    melody_mode: data.melody_mode,
+    vowel_family: data.vowel_family,
+    detected_key: data.detected_key,
+    is_repetitive: data.is_repetitive,
+    tempo_bpm: data.flow?.tempo_bpm,
+    flow_style: data.flow?.flow_style,
+  };
 
-  // Organized transcript — bars with syllable counts
-  renderOrganizedTranscript(data.rough_text || "", currentPhraseMap, data.melody_mode);
+  // Organized transcript
+  renderOrganizedTranscript(currentRoughText, currentPhraseMap, data.melody_mode);
 
-  // Melody badge
+  // Badges
   melodyBadge.classList.toggle("hidden", !data.melody_mode);
+  repetitiveBadge.classList.toggle("hidden", !data.is_repetitive);
+
+  // Detected key badge on metronome
+  if (data.detected_key && state.key === "auto") {
+    detectedKeyBadge.textContent = `Detected: ${data.detected_key}`;
+    detectedKeyBadge.classList.remove("hidden");
+  } else {
+    detectedKeyBadge.classList.add("hidden");
+  }
+
+  // Analysis chips
+  const chips = [];
+  if (data.detected_key) chips.push(`<span class="a-chip key-chip">Key: <strong>${data.detected_key}</strong></span>`);
+  if (data.vowel_family)  chips.push(`<span class="a-chip">Vowel: <strong>${data.vowel_family}</strong></span>`);
+  analysisChipsEl.innerHTML = chips.join("");
 
   // Timeline
   renderTimeline(currentPhraseMap, audioDuration);
@@ -455,13 +518,22 @@ function onTimelineUpdate() {
 function createVersionCard(version, isBest, phraseMap) {
   const card = document.createElement("div");
   card.className = "version-card";
+  card.dataset.versionName = version.name;
 
   const scorePercent = Math.round((version.score || 0) * 100);
   const lines = (version.lyrics || "").split("\n").filter((l) => l.trim());
 
-  const lyricsHtml = lines.map((line, lineIdx) =>
-    `<div class="lyric-line" data-line="${lineIdx}">${escapeHtml(line)}</div>`
-  ).join("");
+  const lyricsHtml = lines.map((line, lineIdx) => {
+    const syls = phraseMap[lineIdx]?.syllables || "?";
+    return `<div class="lyric-line" data-line="${lineIdx}">
+      <span class="lyric-text">${escapeHtml(line)}</span>
+      <span class="line-controls">
+        <span class="line-syls">${syls}</span>
+        <button class="line-lock-btn" data-line="${lineIdx}" title="Lock this line">🔓</button>
+        <button class="line-regen-btn" data-line="${lineIdx}" title="Regenerate this line">↻</button>
+      </span>
+    </div>`;
+  }).join("");
 
   card.innerHTML = `
     <div class="version-header">
@@ -480,6 +552,7 @@ function createVersionCard(version, isBest, phraseMap) {
     </div>
   `;
 
+  // Copy
   card.querySelector(".copy-btn").addEventListener("click", function () {
     navigator.clipboard.writeText(decodeURIComponent(this.dataset.lyrics)).then(() => {
       this.textContent = "✓ Copied!";
@@ -488,6 +561,7 @@ function createVersionCard(version, isBest, phraseMap) {
     });
   });
 
+  // Sync
   const syncBtn = card.querySelector(".sync-btn");
   if (syncBtn) {
     syncBtn.addEventListener("click", () => {
@@ -495,7 +569,96 @@ function createVersionCard(version, isBest, phraseMap) {
     });
   }
 
+  // Lock buttons
+  card.querySelectorAll(".line-lock-btn").forEach((btn) => {
+    btn.addEventListener("click", () => toggleLockLine(card, version.name, parseInt(btn.dataset.line)));
+  });
+
+  // Regenerate single line buttons
+  card.querySelectorAll(".line-regen-btn").forEach((btn) => {
+    btn.addEventListener("click", () => regenerateSingleLine(card, version.name, parseInt(btn.dataset.line)));
+  });
+
   return card;
+}
+
+/* ══════════════════════════════════════
+   LOCK LINE
+   ══════════════════════════════════════ */
+function toggleLockLine(card, versionName, lineIdx) {
+  if (!lockedLines[versionName]) lockedLines[versionName] = {};
+
+  const lineEl = card.querySelector(`.lyric-line[data-line="${lineIdx}"]`);
+  const btn = card.querySelector(`.line-lock-btn[data-line="${lineIdx}"]`);
+  const textEl = lineEl.querySelector(".lyric-text");
+
+  if (lockedLines[versionName][lineIdx] !== undefined) {
+    // Unlock
+    delete lockedLines[versionName][lineIdx];
+    lineEl.classList.remove("line-locked");
+    btn.textContent = "🔓";
+  } else {
+    // Lock
+    lockedLines[versionName][lineIdx] = textEl.textContent;
+    lineEl.classList.add("line-locked");
+    btn.textContent = "🔒";
+  }
+}
+
+/* ══════════════════════════════════════
+   REGENERATE SINGLE LINE
+   ══════════════════════════════════════ */
+async function regenerateSingleLine(card, versionName, lineIdx) {
+  const regenBtn = card.querySelector(`.line-regen-btn[data-line="${lineIdx}"]`);
+  const lineEl   = card.querySelector(`.lyric-line[data-line="${lineIdx}"]`);
+  const textEl   = lineEl.querySelector(".lyric-text");
+
+  if (lineEl.classList.contains("line-locked")) return; // don't regen locked lines
+
+  regenBtn.textContent = "⏳";
+  regenBtn.disabled = true;
+  lineEl.classList.add("line-regenerating");
+
+  // Collect all current lines from this card
+  const allLineEls = card.querySelectorAll(".lyric-line");
+  const contextLines = Array.from(allLineEls).map((el) =>
+    el.querySelector(".lyric-text").textContent
+  );
+
+  const syllableCount = currentPhraseMap[lineIdx]?.syllables || 8;
+  const versionLocked = lockedLines[versionName] || {};
+
+  try {
+    const res = await fetch("/regenerate-line", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bar_index: lineIdx,
+        syllable_count: syllableCount,
+        context_lines: contextLines,
+        locked_lines: versionLocked,
+        rough_text: currentRoughText,
+        flow_data: currentFlowData,
+        tone: state.tone,
+        mode: state.mode,
+        vibe: state.vibe,
+        gen_mode: state.gen_mode,
+        key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
+      }),
+    });
+    const data = await res.json();
+    if (data.success && data.line) {
+      textEl.textContent = data.line;
+      lineEl.classList.add("line-refreshed");
+      setTimeout(() => lineEl.classList.remove("line-refreshed"), 1200);
+    }
+  } catch (err) {
+    console.error("Regenerate line failed:", err);
+  } finally {
+    regenBtn.textContent = "↻";
+    regenBtn.disabled = false;
+    lineEl.classList.remove("line-regenerating");
+  }
 }
 
 /* ══════════════════════════════════════

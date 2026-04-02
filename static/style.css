@@ -776,6 +776,9 @@ body {
 
 /* ── Karaoke — line level ── */
 .lyric-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 4px 10px;
   border-radius: 4px;
   border-left: 2px solid transparent;
@@ -924,6 +927,239 @@ body {
   font-weight: 500;
   padding: 6px 12px;
   border-radius: 50px;
+}
+
+/* ── Key Selector ── */
+.key-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.key-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.key-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+}
+
+.key-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 7px 4px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.1s;
+}
+
+.key-btn:hover {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.key-btn.active {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.key-quality {
+  display: flex;
+  gap: 6px;
+}
+
+.key-quality-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 5px 14px;
+  border-radius: 50px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.key-quality-btn:hover {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.key-quality-btn.active {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.detected-key-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--accent2);
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* ── Control hint ── */
+.control-hint {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  opacity: 0.7;
+  text-transform: none;
+  margin-left: 4px;
+}
+
+/* ── Analysis Chips ── */
+.analysis-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.a-chip {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: 50px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.a-chip.key-chip {
+  color: var(--accent2);
+  background: rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+.a-chip.vowel-chip {
+  color: #a78bfa;
+  background: rgba(124, 58, 237, 0.1);
+  border-color: rgba(124, 58, 237, 0.3);
+}
+
+.detected-badge {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--gold);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+/* ── Line Controls (lock + regen per lyric line) ── */
+.lyric-text {
+  flex: 1;
+}
+
+.line-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.lyric-line:hover .line-controls {
+  opacity: 1;
+}
+
+.line-syls {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.line-lock-btn,
+.line-regen-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s;
+  line-height: 1;
+}
+
+.line-lock-btn:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.line-regen-btn:hover {
+  border-color: var(--accent);
+  color: #a78bfa;
+  background: rgba(124, 58, 237, 0.1);
+}
+
+/* Locked line state */
+.lyric-line.line-locked {
+  background: rgba(245, 158, 11, 0.06);
+  border-left-color: var(--gold);
+}
+
+.lyric-line.line-locked .line-controls {
+  opacity: 1;
+}
+
+.lyric-line.line-locked .line-lock-btn {
+  color: var(--gold);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+/* Regenerating state */
+.lyric-line.line-regenerating .lyric-text {
+  opacity: 0.4;
+}
+
+.lyric-line.line-regenerating .line-regen-btn {
+  animation: spin 0.6s linear infinite;
+  color: var(--accent);
+}
+
+/* Flash animation when a line is refreshed */
+@keyframes line-refresh-flash {
+  0%   { background: rgba(124, 58, 237, 0.25); }
+  100% { background: transparent; }
+}
+
+.lyric-line.line-refreshed {
+  animation: line-refresh-flash 0.8s ease-out forwards;
 }
 
 /* ── Utilities ── */

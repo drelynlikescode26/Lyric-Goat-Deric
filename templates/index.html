@@ -133,6 +133,32 @@
           <button class="bpm-preset" data-bpm="120">120 — trap</button>
           <button class="bpm-preset" data-bpm="140">140 — fast</button>
         </div>
+
+        <!-- Key selector -->
+        <div class="key-section">
+          <div class="key-header">
+            <span class="metronome-label">KEY</span>
+            <span id="detectedKeyBadge" class="detected-key-badge hidden"></span>
+          </div>
+          <div class="key-grid" id="keyGrid">
+            <button class="key-btn" data-key="C">C</button>
+            <button class="key-btn" data-key="C#">C#</button>
+            <button class="key-btn" data-key="D">D</button>
+            <button class="key-btn" data-key="D#">D#</button>
+            <button class="key-btn" data-key="E">E</button>
+            <button class="key-btn" data-key="F">F</button>
+            <button class="key-btn" data-key="F#">F#</button>
+            <button class="key-btn" data-key="G">G</button>
+            <button class="key-btn" data-key="G#">G#</button>
+            <button class="key-btn" data-key="A">A</button>
+            <button class="key-btn" data-key="A#">A#</button>
+            <button class="key-btn" data-key="B">B</button>
+          </div>
+          <div class="key-quality">
+            <button class="key-quality-btn active" data-quality="major">Major</button>
+            <button class="key-quality-btn" data-quality="minor">Minor</button>
+          </div>
+        </div>
       </div>
 
       <div class="divider"><span>or</span></div>
@@ -152,6 +178,15 @@
       <div class="controls-grid">
 
         <div class="control-group">
+          <label class="control-label">APPROACH <span class="control-hint">how the AI reads your mumble</span></label>
+          <div class="pill-group" data-group="gen_mode">
+            <button class="pill active" data-value="cadence">Cadence — follow the rhythm</button>
+            <button class="pill" data-value="literal">Literal — decode the words</button>
+            <button class="pill" data-value="creative">Creative — vibe only</button>
+          </div>
+        </div>
+
+        <div class="control-group">
           <label class="control-label">TONE</label>
           <div class="pill-group" data-group="tone">
             <button class="pill active" data-value="melodic">Melodic</button>
@@ -162,7 +197,7 @@
         </div>
 
         <div class="control-group">
-          <label class="control-label">MODE</label>
+          <label class="control-label">TYPE</label>
           <div class="pill-group" data-group="mode">
             <button class="pill active" data-value="verse">Verse</button>
             <button class="pill" data-value="hook">Hook</button>
@@ -197,8 +232,10 @@
         <div class="rough-header">
           <span class="rough-badge">RAW TRANSCRIPTION</span>
           <span class="rough-badge melody-badge hidden" id="melodyBadge">MELODY MODE</span>
+          <span class="rough-badge detected-badge hidden" id="repetitiveBadge">REPETITIVE — cadence used</span>
         </div>
-        <p id="roughText" class="rough-text"></p>
+        <div id="analysisChips" class="analysis-chips"></div>
+        <div id="roughText" class="rough-text"></div>
 
         <!-- Phrase timeline -->
         <div class="timeline-wrap" id="timelineWrap">
