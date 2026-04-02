@@ -320,6 +320,104 @@ body {
   background: var(--surface2);
 }
 
+/* ── Melody Badge ── */
+.melody-badge {
+  background: rgba(124, 58, 237, 0.2);
+  border: 1px solid var(--accent);
+  color: #a78bfa;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+/* ── Phrase Timeline ── */
+.timeline-wrap {
+  margin: 20px 0 8px;
+}
+
+.timeline-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.timeline-track {
+  position: relative;
+  height: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.timeline-block {
+  position: absolute;
+  top: 4px;
+  height: calc(100% - 8px);
+  background: rgba(124, 58, 237, 0.35);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+  min-width: 4px;
+}
+
+.timeline-block:hover,
+.timeline-block.active {
+  background: rgba(124, 58, 237, 0.7);
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--accent2);
+  pointer-events: none;
+  transition: left 0.1s linear;
+  z-index: 2;
+}
+
+.timeline-phrases {
+  position: relative;
+  height: 36px;
+  margin-top: 4px;
+}
+
+.timeline-phrase-label {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 4px;
+  overflow: hidden;
+}
+
+.tl-time {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tl-text {
+  font-size: 0.68rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-text.muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .rough-header {
   margin-bottom: 12px;
 }
@@ -436,12 +534,36 @@ body {
   padding: 20px;
   font-size: 1rem;
   line-height: 2;
-  white-space: pre-wrap;
   color: var(--text);
 }
 
-.copy-btn {
-  margin: 0 20px 16px;
+/* Karaoke lines */
+.lyric-line {
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+  cursor: default;
+}
+
+.lyric-line.active-line {
+  background: rgba(124, 58, 237, 0.25);
+  color: #fff;
+  font-weight: 600;
+}
+
+.lyric-line.past-line {
+  color: var(--text-muted);
+}
+
+/* Card actions row */
+.card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 16px;
+}
+
+.copy-btn,
+.sync-btn {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -454,14 +576,14 @@ body {
   transition: all 0.12s;
 }
 
-.copy-btn:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
+.copy-btn:hover { border-color: var(--accent); color: var(--text); }
+.copy-btn.copied { border-color: var(--green); color: var(--green); }
 
-.copy-btn.copied {
-  border-color: var(--green);
-  color: var(--green);
+.sync-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+.sync-btn.syncing {
+  background: rgba(6, 182, 212, 0.1);
+  border-color: var(--accent2);
+  color: var(--accent2);
 }
 
 /* ── Utilities ── */

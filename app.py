@@ -91,10 +91,12 @@ def process():
             "success": True,
             "rough_text": rough_text,
             "melody_mode": flow_data.get("melody_mode", False),
+            "phrase_map": flow_data.get("phrase_map", []),
             "flow": {
                 "tempo_bpm": flow_data["tempo_bpm"],
                 "flow_style": flow_data["flow_style"],
                 "syllable_count": flow_data["syllable_count"],
+                "duration": flow_data.get("duration"),
             },
             "versions": versions,
         })

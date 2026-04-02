@@ -89,12 +89,23 @@
     <!-- Results -->
     <section id="resultsSection" class="hidden">
 
-      <!-- Rough Text -->
+      <!-- Rough Text + Phrase Timeline -->
       <div class="card rough-card">
         <div class="rough-header">
           <span class="rough-badge">RAW TRANSCRIPTION</span>
+          <span class="rough-badge melody-badge hidden" id="melodyBadge">MELODY MODE</span>
         </div>
         <p id="roughText" class="rough-text"></p>
+
+        <!-- Phrase timeline -->
+        <div class="timeline-wrap" id="timelineWrap">
+          <div class="timeline-label">PHRASE MAP — click any block to seek</div>
+          <div class="timeline-track" id="timelineTrack">
+            <div class="timeline-playhead" id="timelinePlayhead"></div>
+          </div>
+          <div class="timeline-phrases" id="timelinePhrases"></div>
+        </div>
+
         <div class="flow-stats" id="flowStats"></div>
       </div>
 

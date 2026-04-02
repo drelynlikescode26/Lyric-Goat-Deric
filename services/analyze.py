@@ -47,6 +47,7 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
 
     melody_mode = len(word_timestamps) < 3
+    duration = round(float(len(y) / sr), 2)
 
     return {
         "tempo_bpm": tempo,
@@ -57,6 +58,7 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
         "flow_map": flow_map,
         "phrase_map": phrase_map,
         "melody_mode": melody_mode,
+        "duration": duration,
         "avg_words_per_beat": _words_per_beat(word_timestamps, beat_times),
     }
 
