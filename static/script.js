@@ -37,6 +37,127 @@ const timelinePlayhead = document.getElementById("timelinePlayhead");
 const timelinePhrases  = document.getElementById("timelinePhrases");
 const melodyBadge      = document.getElementById("melodyBadge");
 
+/* ══════════════════════════════════
+   METRONOME ENGINE (Web Audio API)
+   Uses a look-ahead scheduler for
+   sample-accurate click timing.
+   ══════════════════════════════════ */
+let metroCtx = null;
+let metroRunning = false;
+let metroBpm = 90;
+let nextBeatTime = 0;
+let beatCount = 0;
+let metroSchedulerTimer = null;
+const LOOKAHEAD_MS = 25;      // scheduler interval
+const SCHEDULE_AHEAD_S = 0.1; // how far ahead to schedule
+
+const metroToggle  = document.getElementById("metroToggle");
+const metroIcon    = document.getElementById("metroIcon");
+const metroLabel   = document.getElementById("metroLabel");
+const bpmValueEl   = document.getElementById("bpmValue");
+const bpmDownBtn   = document.getElementById("bpmDown");
+const bpmUpBtn     = document.getElementById("bpmUp");
+const beatDots     = document.querySelectorAll(".beat-dot");
+
+// BPM +/−
+bpmDownBtn.addEventListener("click", () => setBpm(metroBpm - 1));
+bpmUpBtn.addEventListener("click",   () => setBpm(metroBpm + 1));
+
+// BPM presets
+document.querySelectorAll(".bpm-preset").forEach((btn) => {
+  btn.addEventListener("click", () => setBpm(parseInt(btn.dataset.bpm)));
+});
+
+// Hold +/− for fast scroll
+let bpmHoldTimer = null;
+function startBpmHold(delta) {
+  bpmHoldTimer = setInterval(() => setBpm(metroBpm + delta), 120);
+}
+function stopBpmHold() { clearInterval(bpmHoldTimer); bpmHoldTimer = null; }
+bpmDownBtn.addEventListener("mousedown", () => startBpmHold(-1));
+bpmUpBtn.addEventListener("mousedown",   () => startBpmHold(1));
+["mouseup","mouseleave"].forEach((e) => {
+  bpmDownBtn.addEventListener(e, stopBpmHold);
+  bpmUpBtn.addEventListener(e, stopBpmHold);
+});
+
+function setBpm(val) {
+  metroBpm = Math.min(220, Math.max(40, val));
+  bpmValueEl.textContent = metroBpm;
+  document.querySelectorAll(".bpm-preset").forEach((b) => {
+    b.classList.toggle("active", parseInt(b.dataset.bpm) === metroBpm);
+  });
+}
+
+// Toggle metronome on/off
+metroToggle.addEventListener("click", () => {
+  metroRunning ? stopMetronome() : startMetronome();
+});
+
+function startMetronome() {
+  if (metroRunning) return;
+  metroCtx = new (window.AudioContext || window.webkitAudioContext)();
+  metroRunning = true;
+  beatCount = 0;
+  nextBeatTime = metroCtx.currentTime + 0.05;
+  metroIcon.textContent = "■";
+  metroLabel.textContent = "Stop";
+  metroToggle.classList.add("metro-active");
+  scheduleBeats();
+}
+
+function stopMetronome() {
+  metroRunning = false;
+  clearTimeout(metroSchedulerTimer);
+  metroSchedulerTimer = null;
+  if (metroCtx) { metroCtx.close(); metroCtx = null; }
+  metroIcon.textContent = "▶";
+  metroLabel.textContent = "Start";
+  metroToggle.classList.remove("metro-active");
+  beatDots.forEach((d) => d.classList.remove("beat-on", "beat-accent"));
+}
+
+function scheduleBeats() {
+  if (!metroRunning) return;
+
+  while (nextBeatTime < metroCtx.currentTime + SCHEDULE_AHEAD_S) {
+    const isAccent = beatCount % 4 === 0;
+    scheduleClick(nextBeatTime, isAccent);
+    scheduleVisualBeat(nextBeatTime, beatCount % 4);
+    nextBeatTime += 60 / metroBpm;
+    beatCount++;
+  }
+
+  metroSchedulerTimer = setTimeout(scheduleBeats, LOOKAHEAD_MS);
+}
+
+function scheduleClick(time, isAccent) {
+  const osc  = metroCtx.createOscillator();
+  const gain = metroCtx.createGain();
+  osc.connect(gain);
+  gain.connect(metroCtx.destination);
+
+  // Accent beat (beat 1) = higher pitch, louder
+  osc.frequency.value = isAccent ? 1200 : 900;
+  gain.gain.setValueAtTime(isAccent ? 0.6 : 0.35, time);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+
+  osc.start(time);
+  osc.stop(time + 0.04);
+}
+
+function scheduleVisualBeat(time, dotIndex) {
+  // Schedule visual update using currentTime offset
+  const delay = Math.max(0, (time - metroCtx.currentTime) * 1000);
+  setTimeout(() => {
+    if (!metroRunning) return;
+    beatDots.forEach((d, i) => {
+      d.classList.toggle("beat-on", i === dotIndex);
+      d.classList.toggle("beat-accent", i === dotIndex && dotIndex === 0);
+    });
+  }, delay);
+}
+
 /* ══════════════════
    TIPS TOGGLE
    ══════════════════ */
@@ -94,6 +215,7 @@ function stopRecording() {
   isRecording = false;
   clearInterval(timerInterval);
   timerInterval = null;
+  stopMetronome();
 }
 
 function updateTimer() {
