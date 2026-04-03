@@ -6,9 +6,6 @@ import anthropic
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # ── Phonetic mapping ─────────────────────────────────────────────────────────
-# When a vowel family is detected in the mumble, bias Claude toward words
-# that share that vowel sound — so the output sounds like the original.
-
 PHONETIC_MAP = {
     "ayy": ["day", "pain", "same", "late", "way", "stay", "rain", "chains", "fade", "came", "name", "frame"],
     "oh":  ["go", "alone", "home", "road", "know", "show", "grow", "cold", "soul", "hold", "fold", "gold"],
@@ -16,6 +13,15 @@ PHONETIC_MAP = {
     "ah":  ["heart", "far", "hard", "dark", "start", "apart", "scar", "star", "arm", "charge", "guard"],
     "uh":  ["love", "above", "enough", "blood", "flood", "stuck", "rough", "cut", "run", "done", "trust"],
     "ii":  ["high", "die", "cry", "fly", "try", "lie", "side", "mind", "time", "right", "night", "light"],
+}
+
+# Pitch-to-vowel affinity: which vowel sounds work best with each pitch direction
+PITCH_VOWEL_AFFINITY = {
+    "rising":   ["ee", "ayy", "ii"],   # bright high vowels go up
+    "falling":  ["oh", "ah", "uh"],    # dark open vowels fall
+    "held":     ["oh", "ee", "ah"],    # sustained sounds
+    "staccato": ["ayy", "uh", "ii"],   # punchy short sounds
+    "flat":     None,                  # no preference
 }
 
 STYLE_DESCRIPTIONS = {
@@ -37,9 +43,9 @@ STYLE_DESCRIPTIONS = {
         "love":          "romantic, vulnerable, genuine feeling",
     },
     "gen_mode": {
-        "literal":  "Try to decode the actual words/sounds from the mumble. Stay close to what was said.",
-        "cadence":  "Ignore the words entirely. Focus only on rhythm and syllable count. Write original lines that match the flow.",
-        "creative": "Use the vibe and emotion as your guide. Most freedom here — write what feels right for the moment.",
+        "literal":  "Decode the actual words/sounds from the mumble. Stay close to what was said.",
+        "cadence":  "Ignore the words. Follow rhythm and syllable count only. Write original lines.",
+        "creative": "Use vibe and emotion. Most freedom here — write what feels right for the moment.",
     },
 }
 
@@ -83,7 +89,7 @@ def _extract_phonetic_anchors(phrase_map: list) -> list:
     return anchors
 
 
-# ── Prompt building ───────────────────────────────────────────────────────────
+# ── System prompt ─────────────────────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
     return """\
@@ -99,12 +105,17 @@ YOUR CRAFT:
 - You never use these clichés: "ride or die", "real ones", "on top of the world", \
 "grind never stops", "make it rain", "all eyes on me", "can't stop won't stop"
 - You write lines people want to repeat and remember
+- You understand that singability > complexity — a line that lands > a line that impresses
 
 YOUR CONSTRAINTS:
 - Match each bar's syllable count precisely (±1 max) — the flow cannot be broken
 - The number of output lines MUST equal the number of input bars exactly
+- Respect pitch direction: rising phrases → bright ascending words; falling → heavier grounded words
+- Low confidence bars → don't try to decode words, just match the rhythm
 - No labels, headers, or explanations — pure lyrics only"""
 
+
+# ── Phrase template builder ───────────────────────────────────────────────────
 
 def _build_phrase_template(phrase_map: list, phonetic_anchors: list, melody_mode: bool, gen_mode: str) -> str:
     if not phrase_map:
@@ -112,16 +123,48 @@ def _build_phrase_template(phrase_map: list, phonetic_anchors: list, melody_mode
 
     lines = []
     for i, phrase in enumerate(phrase_map):
-        anchor = phonetic_anchors[i] if i < len(phonetic_anchors) else ""
-        anchor_hint = f"  [rhyme sound: {anchor}]" if anchor else ""
+        anchor      = phonetic_anchors[i] if i < len(phonetic_anchors) else ""
+        anchor_hint = f"  [rhyme: {anchor}]" if anchor else ""
 
-        if melody_mode or not phrase["text"] or gen_mode == "cadence":
-            lines.append(f"  Bar {i+1}: (rhythm phrase)  →  {phrase['syllables']} syllables{anchor_hint}")
+        # Per-phrase audio metadata
+        pitch    = phrase.get("pitch_symbol", "")
+        density  = phrase.get("density_label", "")
+        energy   = phrase.get("energy_level", "")
+        conf     = phrase.get("confidence_label", "")
+        pause_af = phrase.get("pause_after", 0)
+
+        meta_parts = []
+        if pitch:
+            meta_parts.append(pitch)
+        if density:
+            meta_parts.append(density)
+        if energy and energy != "mid":
+            meta_parts.append(f"{energy} energy")
+        meta_str = "  [" + " | ".join(meta_parts) + "]" if meta_parts else ""
+
+        # Breathing room hint for long pauses
+        breath_hint = "  [breathe after]" if pause_af > 0.6 else ""
+
+        # Confidence drives whether to show transcript text
+        low_conf = conf == "low"
+        force_cadence = melody_mode or gen_mode == "cadence" or low_conf
+
+        if force_cadence or not phrase["text"]:
+            conf_note = "  ← cadence only" if low_conf and gen_mode == "literal" else ""
+            lines.append(
+                f"  Bar {i+1}: (rhythm)  →  {phrase['syllables']} syl"
+                f"{meta_str}{anchor_hint}{breath_hint}{conf_note}"
+            )
         else:
-            lines.append(f'  Bar {i+1}: "{phrase["text"]}"  →  {phrase["syllables"]} syllables{anchor_hint}')
+            lines.append(
+                f'  Bar {i+1}: "{phrase["text"]}"  →  {phrase["syllables"]} syl'
+                f"{meta_str}{anchor_hint}{breath_hint}"
+            )
 
     return "\n".join(lines)
 
+
+# ── User prompt builder ───────────────────────────────────────────────────────
 
 def _build_user_prompt(
     rough_text: str,
@@ -139,64 +182,74 @@ def _build_user_prompt(
     vibe_desc     = STYLE_DESCRIPTIONS["vibe"].get(vibe, vibe)
     gen_mode_desc = STYLE_DESCRIPTIONS["gen_mode"].get(gen_mode, "")
 
-    tempo      = flow_data.get("tempo_bpm", "unknown")
-    tempo_str  = f"{tempo:.0f}" if isinstance(tempo, float) else str(tempo)
-    flow_style = flow_data.get("flow_style", "mixed")
-    phrase_map = flow_data.get("phrase_map", [])
-    melody_mode   = flow_data.get("melody_mode", False)
-    vowel_family  = flow_data.get("vowel_family")
-    detected_key  = flow_data.get("detected_key", key)
+    tempo       = flow_data.get("tempo_bpm", "unknown")
+    tempo_str   = f"{tempo:.0f}" if isinstance(tempo, float) else str(tempo)
+    flow_style  = flow_data.get("flow_style", "mixed")
+    phrase_map  = flow_data.get("phrase_map", [])
+    melody_mode = flow_data.get("melody_mode", False)
+    vowel_family = flow_data.get("vowel_family")
+    detected_key = flow_data.get("detected_key", key)
 
     phrase_template = _build_phrase_template(phrase_map, phonetic_anchors, melody_mode, gen_mode)
 
-    # Phonetic hint from vowel family
+    # Phonetic vowel hint
     phonetic_hint = ""
     if vowel_family and vowel_family in PHONETIC_MAP:
         sample_words = ", ".join(PHONETIC_MAP[vowel_family][:6])
-        phonetic_hint = f"\nDOMINANT VOWEL SOUND: '{vowel_family}' — bias rhymes toward words like: {sample_words}"
+        phonetic_hint = f"\nDOMINANT VOWEL SOUND: '{vowel_family}' — bias endings toward: {sample_words}"
 
-    # Key context
+    # Pitch affinity hint
+    pitch_hint = ""
+    dominant_pitch = _dominant_pitch(phrase_map)
+    if dominant_pitch and dominant_pitch in PITCH_VOWEL_AFFINITY:
+        affinities = PITCH_VOWEL_AFFINITY[dominant_pitch]
+        if affinities:
+            pitch_hint = f"\nPITCH DIRECTION: mostly {dominant_pitch} — favor words with {'/'.join(affinities[:2])} vowel sounds"
+
+    # Key hint
     key_used = key if key and key != "auto" else detected_key
     key_hint = f"\nKEY: {key_used}" if key_used else ""
 
     if gen_mode == "cadence" or melody_mode:
         input_block = f"""APPROACH: Cadence Mode — ignore words, follow the rhythm only.
-The artist hummed/mumbled. Don't try to decode the words.
-Match the syllable counts exactly and write original lines.
+The artist hummed/mumbled. Don't try to decode words.
+Match syllable counts exactly and write original lines.
 
-TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_hint}{phonetic_hint}
+TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_hint}{phonetic_hint}{pitch_hint}
 
 BAR-BY-BAR RHYTHM TEMPLATE:
 {phrase_template or "  (use your judgment)"}"""
 
     elif gen_mode == "literal":
-        input_block = f"""APPROACH: Literal Mode — stay close to the actual sounds/words mumbled.
-Try to decode what the artist was saying. Keep real words where recognizable.
+        input_block = f"""APPROACH: Literal Mode — stay close to the actual sounds mumbled.
+Low-confidence bars (marked ← cadence only) should ignore the words and match rhythm.
 
 ARTIST'S MUMBLE: "{rough_text}"
 
-TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_hint}{phonetic_hint}
+TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_hint}{phonetic_hint}{pitch_hint}
 
 BAR-BY-BAR BREAKDOWN:
 {phrase_template or "  (use the full transcription)"}"""
 
     else:  # creative
-        input_block = f"""APPROACH: Creative Mode — use the vibe and emotion, not the words.
+        input_block = f"""APPROACH: Creative Mode — use vibe and emotion, not the words.
 The mumble is inspiration, not instruction. Write what the moment calls for.
 
 MUMBLE REFERENCE: "{rough_text}"
 
-TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_hint}{phonetic_hint}
+TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_hint}{phonetic_hint}{pitch_hint}
 
-BAR STRUCTURE (syllable targets):
+BAR STRUCTURE:
 {phrase_template or "  (use your judgment)"}"""
 
     rules = f"""RULES:
 1. Write exactly one lyric line per bar — same count, same order
-2. Each line MUST match its syllable count (±1 max) — flow depends on this
-3. End sounds should match the rhyme targets shown where possible
-4. Vibe: {vibe_desc}
-5. Output ONLY the lyrics — no bar numbers, labels, or explanation"""
+2. Each line MUST match its syllable count (±1 max) — the flow cannot break
+3. End sounds should match rhyme targets where shown
+4. Respect [breathe after] markers — the phrase needs room to land
+5. Pitch direction hints tell you the vocal shape — honor them in word choice
+6. Vibe: {vibe_desc}
+7. Output ONLY the lyrics — no numbers, labels, or explanation"""
 
     return f"""Artist's raw vocal recording — transform this into real lyrics.
 
@@ -214,6 +267,17 @@ Write the **{variant["label"]}** ({variant["description"]}):
 Write the lyrics now:"""
 
 
+def _dominant_pitch(phrase_map: list) -> str:
+    """Find the most common pitch pattern across all phrases."""
+    if not phrase_map:
+        return ""
+    counts = {}
+    for p in phrase_map:
+        pat = p.get("pitch_pattern", "flat")
+        counts[pat] = counts.get(pat, 0) + 1
+    return max(counts, key=counts.get) if counts else ""
+
+
 # ── Single-line regeneration ──────────────────────────────────────────────────
 
 def generate_single_line(
@@ -229,37 +293,47 @@ def generate_single_line(
     gen_mode: str,
     key: str,
 ) -> str:
-    """
-    Regenerate a single bar at bar_index.
-    context_lines: list of current lyric lines (locked + unlocked)
-    locked_lines: dict {line_index: lyric_text} of lines the user locked
-    """
-    vibe_desc = STYLE_DESCRIPTIONS["vibe"].get(vibe, vibe)
+    vibe_desc    = STYLE_DESCRIPTIONS["vibe"].get(vibe, vibe)
     vowel_family = flow_data.get("vowel_family")
     detected_key = flow_data.get("detected_key", key)
-    key_used = key if key and key != "auto" else detected_key
+    key_used     = key if key and key != "auto" else detected_key
+
+    # Get phrase-level audio features for this bar
+    phrase_map = flow_data.get("phrase_map", [])
+    phrase = phrase_map[bar_index] if bar_index < len(phrase_map) else {}
+    pitch_sym  = phrase.get("pitch_symbol", "")
+    density    = phrase.get("density_label", "")
+    confidence = phrase.get("confidence_label", "med")
 
     phonetic_hint = ""
     if vowel_family and vowel_family in PHONETIC_MAP:
         sample_words = ", ".join(PHONETIC_MAP[vowel_family][:6])
         phonetic_hint = f"\nDominant vowel sound: '{vowel_family}' — use words like: {sample_words}"
 
-    # Show surrounding context
+    audio_hint = ""
+    if pitch_sym or density:
+        parts = [x for x in [pitch_sym, density] if x]
+        audio_hint = f"\nBar audio: {' | '.join(parts)}"
+
+    # Context display
     context_display = []
     for i, line in enumerate(context_lines):
         if i == bar_index:
-            context_display.append(f"  Bar {i+1}: ← REWRITE THIS (target: {syllable_count} syllables)")
+            conf_note = f" [conf: {confidence}]" if confidence else ""
+            context_display.append(
+                f"  Bar {i+1}: ← REWRITE THIS (target: {syllable_count} syl{conf_note})"
+            )
         else:
             lock_marker = " [LOCKED]" if str(i) in locked_lines else ""
-            context_display.append(f"  Bar {i+1}: \"{line}\"{lock_marker}")
+            context_display.append(f'  Bar {i+1}: "{line}"{lock_marker}')
     context_str = "\n".join(context_display)
 
-    prompt = f"""You are rewriting ONE bar of lyrics. Everything else stays the same.
+    prompt = f"""Rewrite ONE bar of lyrics. Everything else stays the same.
 
 FULL LYRIC CONTEXT:
 {context_str}
 
-KEY: {key_used or "unknown"}  |  VIBE: {vibe_desc}{phonetic_hint}
+KEY: {key_used or "unknown"}  |  VIBE: {vibe_desc}{phonetic_hint}{audio_hint}
 
 TASK:
 Write a new version of Bar {bar_index + 1} only.
@@ -325,38 +399,75 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> float:
     if not lines:
         return 0.0
 
-    phrase_map = flow_data.get("phrase_map", [])
+    phrase_map   = flow_data.get("phrase_map", [])
+    vowel_family = flow_data.get("vowel_family")
 
-    # Syllable match score
+    # 1. Syllable match score (50%)
     if phrase_map and lines:
         pairs = min(len(lines), len(phrase_map))
         diffs = [
-            max(0, 1 - abs(sum(_count_syllables(w) for w in lines[i].split()) - phrase_map[i]["syllables"]) / max(phrase_map[i]["syllables"], 1))
+            max(0, 1 - abs(
+                sum(_count_syllables(w) for w in lines[i].split()) - phrase_map[i]["syllables"]
+            ) / max(phrase_map[i]["syllables"], 1))
             for i in range(pairs)
         ]
         syllable_score = sum(diffs) / pairs if diffs else 0.5
     else:
         syllable_score = 0.5
 
-    # Rhyme density
+    # 2. Rhyme density (20%)
     last_words = [l.strip().split()[-1].lower().rstrip(".,!?") for l in lines if l.strip().split()]
     rhyme_pairs = sum(
         1 for i in range(len(last_words) - 1)
-        if len(last_words[i]) >= 2 and len(last_words[i+1]) >= 2
-        and last_words[i][-2:] == last_words[i+1][-2:]
+        if len(last_words[i]) >= 2 and len(last_words[i + 1]) >= 2
+        and last_words[i][-2:] == last_words[i + 1][-2:]
     )
     rhyme_score = min(1.0, rhyme_pairs / max(len(lines) / 2, 1))
 
-    # Vowel family match bonus
-    vowel_family = flow_data.get("vowel_family")
-    vowel_bonus = 0.0
+    # 3. Vowel family match (15%)
+    vowel_score = 0.5  # neutral default
     if vowel_family and vowel_family in PHONETIC_MAP:
         target_words = PHONETIC_MAP[vowel_family]
-        lyric_words = lyrics.lower().split()
+        lyric_words  = lyrics.lower().split()
         matches = sum(1 for w in lyric_words if any(w.endswith(t[-3:]) for t in target_words if len(t) >= 3))
-        vowel_bonus = min(0.1, matches * 0.02)
+        vowel_score = min(1.0, matches * 0.15)
 
-    return round(syllable_score * 0.6 + rhyme_score * 0.3 + vowel_bonus, 3)
+    # 4. Singability: penalize lines with too many long words (15%)
+    sing_scores = []
+    for line in lines:
+        words = line.split()
+        if not words:
+            continue
+        long_words = sum(1 for w in words if len(w) > 8)
+        ratio = long_words / len(words)
+        sing_scores.append(max(0.0, 1.0 - ratio * 1.5))
+    singability = sum(sing_scores) / len(sing_scores) if sing_scores else 0.7
+
+    # 5. Density fit: dense phrases should have higher syllable counts (bonus weight)
+    density_score = 0.5
+    if phrase_map and lines:
+        density_fits = []
+        for i in range(min(len(lines), len(phrase_map))):
+            target_syl = phrase_map[i]["syllables"]
+            actual_syl = sum(_count_syllables(w) for w in lines[i].split())
+            dl = phrase_map[i].get("density_label", "mid")
+            # Dense bars should have more syllables; sparse should have fewer
+            if dl == "dense" and actual_syl >= target_syl - 1:
+                density_fits.append(1.0)
+            elif dl == "sparse" and actual_syl <= target_syl + 1:
+                density_fits.append(1.0)
+            else:
+                density_fits.append(0.7)
+        density_score = sum(density_fits) / len(density_fits) if density_fits else 0.5
+
+    return round(
+        syllable_score * 0.50 +
+        rhyme_score    * 0.20 +
+        vowel_score    * 0.15 +
+        singability    * 0.10 +
+        density_score  * 0.05,
+        3
+    )
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -370,7 +481,7 @@ def generate_lyrics(
     gen_mode: str = "cadence",
     key: str = "auto",
 ) -> list[dict]:
-    phrase_map = flow_data.get("phrase_map", [])
+    phrase_map       = flow_data.get("phrase_map", [])
     phonetic_anchors = _extract_phonetic_anchors(phrase_map)
 
     results = []
@@ -386,10 +497,10 @@ def generate_lyrics(
         )
         lyrics = message.content[0].text.strip()
         results.append({
-            "name": variant["name"],
-            "label": variant["label"],
+            "name":   variant["name"],
+            "label":  variant["label"],
             "lyrics": lyrics,
-            "score": _score_lyrics(lyrics, flow_data),
+            "score":  _score_lyrics(lyrics, flow_data),
         })
 
     results = _verify_and_fix(results, phrase_map)

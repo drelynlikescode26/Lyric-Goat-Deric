@@ -1165,6 +1165,100 @@ body {
 /* ── Utilities ── */
 .hidden { display: none !important; }
 
+/* ── Debug / Audit Panel ── */
+.debug-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.debug-toggle {
+  width: 100%;
+  background: var(--surface);
+  border: none;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+}
+
+.debug-toggle:hover { background: var(--surface2); color: var(--text); }
+.debug-arrow { font-size: 0.65rem; transition: transform 0.2s; }
+
+.debug-body {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 16px 20px 20px;
+}
+
+.debug-intro {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.debug-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.debug-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  min-width: 560px;
+}
+
+.debug-table th {
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.debug-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text);
+  vertical-align: middle;
+}
+
+.debug-table tr:last-child td { border-bottom: none; }
+.debug-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+.debug-bar {
+  font-weight: 700;
+  color: var(--accent2);
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-text {
+  color: var(--text-muted);
+  max-width: 180px;
+}
+
+.debug-pitch { font-size: 1rem; }
+
+.debug-conf { font-weight: 700; }
+.conf-high { color: var(--green); }
+.conf-med  { color: var(--gold); }
+.conf-low  { color: var(--red); }
+
 /* ── Responsive ── */
 @media (max-width: 480px) {
   body { padding: 16px 12px 60px; }

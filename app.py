@@ -73,6 +73,7 @@ def process():
             "detected_key": flow_data.get("detected_key"),
             "vowel_family": flow_data.get("vowel_family"),
             "is_repetitive": flow_data.get("is_repetitive", False),
+            "debug_phrases": flow_data.get("debug_phrases", []),
             "flow": {
                 "tempo_bpm": flow_data["tempo_bpm"],
                 "flow_style": flow_data["flow_style"],

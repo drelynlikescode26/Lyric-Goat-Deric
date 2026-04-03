@@ -348,13 +348,13 @@ function renderResults(data) {
   audioDuration = data.flow?.duration || 0;
   currentRoughText = data.rough_text || "";
   currentFlowData = {
-    phrase_map: currentPhraseMap,
-    melody_mode: data.melody_mode,
+    phrase_map:   currentPhraseMap,
+    melody_mode:  data.melody_mode,
     vowel_family: data.vowel_family,
     detected_key: data.detected_key,
     is_repetitive: data.is_repetitive,
-    tempo_bpm: data.flow?.tempo_bpm,
-    flow_style: data.flow?.flow_style,
+    tempo_bpm:    data.flow?.tempo_bpm,
+    flow_style:   data.flow?.flow_style,
   };
 
   // Organized transcript
@@ -394,6 +394,9 @@ function renderResults(data) {
   (data.versions || []).forEach((v, idx) => {
     versionsContainer.appendChild(createVersionCard(v, idx === 0, currentPhraseMap));
   });
+
+  // Debug / Audit panel
+  renderDebugPanel(data.debug_phrases || []);
 
   setTimeout(() => resultsSection.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
 }
@@ -733,4 +736,53 @@ function escapeHtml(str) {
   return str
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/* ══════════════════════════════════════
+   DEBUG / AUDIT PANEL
+   Per-phrase audio analysis table.
+   Shows pitch, density, energy, confidence
+   so the user can see exactly how the
+   audio was interpreted before generation.
+   ══════════════════════════════════════ */
+const debugSection = document.getElementById("debugSection");
+const debugToggle  = document.getElementById("debugToggle");
+const debugArrow   = document.getElementById("debugArrow");
+const debugBody    = document.getElementById("debugBody");
+const debugTableBody = document.getElementById("debugTableBody");
+
+debugToggle.addEventListener("click", () => {
+  const open = !debugBody.classList.contains("hidden");
+  debugBody.classList.toggle("hidden", open);
+  debugArrow.textContent = open ? "▼" : "▲";
+});
+
+const CONF_CLASS = { high: "conf-high", med: "conf-med", low: "conf-low" };
+const PITCH_ICON = { "↗ rising": "↗", "↘ falling": "↘", "~ held": "~", "→ flat": "→", "↕ staccato": "↕" };
+
+function renderDebugPanel(debugPhrases) {
+  if (!debugPhrases || !debugPhrases.length) {
+    debugSection.classList.add("hidden");
+    return;
+  }
+
+  debugSection.classList.remove("hidden");
+  debugTableBody.innerHTML = debugPhrases.map((row) => {
+    const confCls = CONF_CLASS[row.confidence] || "";
+    const pitchIcon = PITCH_ICON[row.pitch] || row.pitch || "—";
+    const transcript = row.text ? escapeHtml(row.text.slice(0, 28)) + (row.text.length > 28 ? "…" : "") : '<em style="opacity:.4">melody</em>';
+    const pauseStr = row.pause_after > 0.15 ? `${row.pause_after.toFixed(1)}s` : "—";
+
+    return `<tr>
+      <td class="debug-bar">${row.bar}</td>
+      <td class="debug-text">${transcript}</td>
+      <td>${row.syllables}</td>
+      <td>${row.duration}s</td>
+      <td class="debug-pitch">${pitchIcon}</td>
+      <td>${row.density || "—"}</td>
+      <td>${row.energy || "—"}</td>
+      <td class="debug-conf ${confCls}">${row.confidence || "—"}</td>
+      <td>${pauseStr}</td>
+    </tr>`;
+  }).join("");
 }

@@ -252,6 +252,28 @@
       <!-- Lyric Versions -->
       <div id="versionsContainer" class="versions-grid"></div>
 
+      <!-- Debug / Audit Panel -->
+      <div class="debug-section hidden" id="debugSection">
+        <button class="debug-toggle" id="debugToggle">
+          <span>PHRASE AUDIT</span>
+          <span class="debug-arrow" id="debugArrow">▼</span>
+        </button>
+        <div class="debug-body hidden" id="debugBody">
+          <p class="debug-intro">Per-phrase audio analysis used to guide lyric generation.</p>
+          <div class="debug-table-wrap">
+            <table class="debug-table" id="debugTable">
+              <thead>
+                <tr>
+                  <th>Bar</th><th>Transcript</th><th>Syl</th><th>Dur</th>
+                  <th>Pitch</th><th>Density</th><th>Energy</th><th>Conf</th><th>Pause↓</th>
+                </tr>
+              </thead>
+              <tbody id="debugTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </section>
 
   </div>
