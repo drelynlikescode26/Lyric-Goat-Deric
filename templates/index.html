@@ -259,7 +259,12 @@
           <span class="debug-arrow" id="debugArrow">▼</span>
         </button>
         <div class="debug-body hidden" id="debugBody">
-          <p class="debug-intro">Per-phrase audio analysis used to guide lyric generation.</p>
+          <div class="debug-header-row">
+            <p class="debug-intro">Per-phrase audio analysis used to guide lyric generation.</p>
+            <button class="benchmark-export-btn" id="benchmarkExportBtn" title="Download benchmark CSV template">
+              ↓ Export CSV
+            </button>
+          </div>
           <div class="debug-table-wrap">
             <table class="debug-table" id="debugTable">
               <thead>
@@ -271,6 +276,7 @@
               <tbody id="debugTableBody"></tbody>
             </table>
           </div>
+          <p class="debug-csv-hint">CSV includes empty columns: <em>expected_feel · feature_misread · fix_applied · notes</em> — fill in after each session to build your benchmark set.</p>
         </div>
       </div>
 

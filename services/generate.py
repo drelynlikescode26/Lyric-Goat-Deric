@@ -127,11 +127,16 @@ def _build_phrase_template(phrase_map: list, phonetic_anchors: list, melody_mode
         anchor_hint = f"  [rhyme: {anchor}]" if anchor else ""
 
         # Per-phrase audio metadata
-        pitch    = phrase.get("pitch_symbol", "")
-        density  = phrase.get("density_label", "")
-        energy   = phrase.get("energy_level", "")
-        conf     = phrase.get("confidence_label", "")
-        pause_af = phrase.get("pause_after", 0)
+        pitch       = phrase.get("pitch_symbol", "")
+        density     = phrase.get("density_label", "")
+        energy      = phrase.get("energy_level", "")
+        conf        = phrase.get("confidence_label", "")
+        pause_af    = phrase.get("pause_after", 0)
+        is_sustained = phrase.get("is_sustained", False)
+        syl_count   = phrase.get("syllables", 4)
+
+        # Hard cap: max words = ceil(syllables / 1.4), never more than 8
+        max_words = min(8, max(2, int(syl_count / 1.4) + 1))
 
         meta_parts = []
         if pitch:
@@ -145,6 +150,12 @@ def _build_phrase_template(phrase_map: list, phonetic_anchors: list, melody_mode
         # Breathing room hint for long pauses
         breath_hint = "  [breathe after]" if pause_af > 0.6 else ""
 
+        # Sustained vowel: fewer words, longer holds
+        sustained_hint = "  [sustained — use 2-3 held words, no short punchy words]" if is_sustained else ""
+
+        # Hard cap line — always shown
+        cap_hint = f"  [max {max_words} words]"
+
         # Confidence drives whether to show transcript text
         low_conf = conf == "low"
         force_cadence = melody_mode or gen_mode == "cadence" or low_conf
@@ -152,13 +163,13 @@ def _build_phrase_template(phrase_map: list, phonetic_anchors: list, melody_mode
         if force_cadence or not phrase["text"]:
             conf_note = "  ← cadence only" if low_conf and gen_mode == "literal" else ""
             lines.append(
-                f"  Bar {i+1}: (rhythm)  →  {phrase['syllables']} syl"
-                f"{meta_str}{anchor_hint}{breath_hint}{conf_note}"
+                f"  Bar {i+1}: (rhythm)  →  {syl_count} syl"
+                f"{meta_str}{cap_hint}{anchor_hint}{breath_hint}{sustained_hint}{conf_note}"
             )
         else:
             lines.append(
-                f'  Bar {i+1}: "{phrase["text"]}"  →  {phrase["syllables"]} syl'
-                f"{meta_str}{anchor_hint}{breath_hint}"
+                f'  Bar {i+1}: "{phrase["text"]}"  →  {syl_count} syl'
+                f"{meta_str}{cap_hint}{anchor_hint}{breath_hint}{sustained_hint}"
             )
 
     return "\n".join(lines)
@@ -192,19 +203,25 @@ def _build_user_prompt(
 
     phrase_template = _build_phrase_template(phrase_map, phonetic_anchors, melody_mode, gen_mode)
 
-    # Phonetic vowel hint
+    # Phonetic vowel hint — soft suggestion, not a hard rule
     phonetic_hint = ""
     if vowel_family and vowel_family in PHONETIC_MAP:
         sample_words = ", ".join(PHONETIC_MAP[vowel_family][:6])
-        phonetic_hint = f"\nDOMINANT VOWEL SOUND: '{vowel_family}' — bias endings toward: {sample_words}"
+        phonetic_hint = (
+            f"\nVOWEL FEEL: The mumble leans toward '{vowel_family}' sounds. "
+            f"You may find words like {sample_words} natural — but don't force it if better words exist."
+        )
 
-    # Pitch affinity hint
+    # Pitch affinity hint — soft suggestion
     pitch_hint = ""
     dominant_pitch = _dominant_pitch(phrase_map)
     if dominant_pitch and dominant_pitch in PITCH_VOWEL_AFFINITY:
         affinities = PITCH_VOWEL_AFFINITY[dominant_pitch]
         if affinities:
-            pitch_hint = f"\nPITCH DIRECTION: mostly {dominant_pitch} — favor words with {'/'.join(affinities[:2])} vowel sounds"
+            pitch_hint = (
+                f"\nPITCH FEEL: mostly {dominant_pitch} — "
+                f"{'/'.join(affinities[:2])} vowel sounds often feel natural here"
+            )
 
     # Key hint
     key_used = key if key and key != "auto" else detected_key
@@ -245,11 +262,13 @@ BAR STRUCTURE:
     rules = f"""RULES:
 1. Write exactly one lyric line per bar — same count, same order
 2. Each line MUST match its syllable count (±1 max) — the flow cannot break
-3. End sounds should match rhyme targets where shown
-4. Respect [breathe after] markers — the phrase needs room to land
-5. Pitch direction hints tell you the vocal shape — honor them in word choice
-6. Vibe: {vibe_desc}
-7. Output ONLY the lyrics — no numbers, labels, or explanation"""
+3. NEVER exceed the [max N words] cap shown for each bar — overstuffed lines don't fit
+4. [sustained] bars need held words — don't write rapid-fire syllables there
+5. End sounds should match rhyme targets where shown
+6. Respect [breathe after] markers — the phrase needs room to land
+7. Vowel/pitch hints are suggestions — use them when they make the line better
+8. Vibe: {vibe_desc}
+9. Output ONLY the lyrics — no numbers, labels, or explanation"""
 
     return f"""Artist's raw vocal recording — transform this into real lyrics.
 
@@ -392,6 +411,107 @@ Lines separated by \\n. Return ONLY the JSON."""
     return versions
 
 
+# ── Phrase-level candidate auto-fix ──────────────────────────────────────────
+
+def _autofix_weak_bars(
+    versions: list,
+    flow_data: dict,
+    rough_text: str,
+    tone: str,
+    mode: str,
+    vibe: str,
+    gen_mode: str,
+    key: str,
+) -> list:
+    """
+    After initial generation, find bars where syllable count is off by >2
+    and attempt a single targeted regeneration for each one.
+    Keeps the replacement only if it scores better than the original.
+    Runs across all three style variants.
+    """
+    phrase_map = flow_data.get("phrase_map", [])
+    if not phrase_map:
+        return versions
+
+    for version in versions:
+        lines = [l for l in version["lyrics"].split("\n") if l.strip()]
+        changed = False
+
+        for i, phrase in enumerate(phrase_map):
+            if i >= len(lines):
+                break
+            target_syl = phrase["syllables"]
+            actual_syl = sum(_count_syllables(w) for w in lines[i].split())
+            diff = abs(actual_syl - target_syl)
+
+            if diff > 2:
+                new_line = generate_single_line(
+                    i, target_syl, lines, {},
+                    rough_text, flow_data, tone, mode, vibe, gen_mode, key,
+                )
+                new_syl = sum(_count_syllables(w) for w in new_line.split())
+                if abs(new_syl - target_syl) < diff:
+                    lines[i] = new_line
+                    changed = True
+
+        if changed:
+            version["lyrics"] = "\n".join(lines)
+
+    return versions
+
+
+# ── Stress-fit scoring ────────────────────────────────────────────────────────
+
+def _stress_fit_score(lyrics: str, phrase_map: list) -> float:
+    """
+    Proxy for how singable/performable the lines are from a stress perspective.
+
+    Rewards:
+    - Lines that end on a naturally stressed syllable (short last word ≤2 syl)
+    - Lines without clusters of polysyllabic words in dense bars
+    - Lines where avg word length matches the phrase density
+
+    Penalizes:
+    - Lines ending on a 3+ syllable word (awkward downbeat)
+    - Dense bars stuffed with long words (hard to deliver fast)
+    """
+    lines = [l for l in lyrics.split("\n") if l.strip()]
+    if not lines:
+        return 0.5
+
+    scores = []
+    for i, line in enumerate(lines):
+        words = line.split()
+        if not words:
+            continue
+
+        # End stress: last word ≤2 syllables = lands clean
+        last_syl = _count_syllables(re.sub(r"[^a-z]", "", words[-1].lower()))
+        end_score = 1.0 if last_syl <= 2 else (0.7 if last_syl == 3 else 0.4)
+
+        # Polysyllabic cluster penalty in dense bars
+        density = phrase_map[i].get("density_label", "mid") if i < len(phrase_map) else "mid"
+        poly = sum(1 for w in words if _count_syllables(w) >= 4)
+        if density == "dense":
+            poly_penalty = min(0.5, poly * 0.20)
+        elif density == "mid":
+            poly_penalty = min(0.3, poly * 0.10)
+        else:
+            poly_penalty = min(0.15, poly * 0.05)
+
+        # Sustained bars: fewer words = better stress
+        is_sustained = phrase_map[i].get("is_sustained", False) if i < len(phrase_map) else False
+        if is_sustained and len(words) > 4:
+            sustained_penalty = (len(words) - 4) * 0.10
+        else:
+            sustained_penalty = 0.0
+
+        line_score = max(0.0, end_score - poly_penalty - sustained_penalty)
+        scores.append(line_score)
+
+    return sum(scores) / len(scores) if scores else 0.5
+
+
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
 def _score_lyrics(lyrics: str, flow_data: dict) -> float:
@@ -432,7 +552,7 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> float:
         matches = sum(1 for w in lyric_words if any(w.endswith(t[-3:]) for t in target_words if len(t) >= 3))
         vowel_score = min(1.0, matches * 0.15)
 
-    # 4. Singability: penalize lines with too many long words (15%)
+    # 4. Singability: penalize lines with too many long words (10%)
     sing_scores = []
     for line in lines:
         words = line.split()
@@ -443,7 +563,23 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> float:
         sing_scores.append(max(0.0, 1.0 - ratio * 1.5))
     singability = sum(sing_scores) / len(sing_scores) if sing_scores else 0.7
 
-    # 5. Density fit: dense phrases should have higher syllable counts (bonus weight)
+    # 5. Max-word cap compliance: penalize lines that blow the cap (5%)
+    cap_score = 1.0
+    if phrase_map and lines:
+        violations = 0
+        total = min(len(lines), len(phrase_map))
+        for i in range(total):
+            syl_target = phrase_map[i]["syllables"]
+            max_w = min(8, max(2, int(syl_target / 1.4) + 1))
+            actual_w = len(lines[i].split())
+            if actual_w > max_w:
+                violations += 1
+        cap_score = max(0.0, 1.0 - violations / total)
+
+    # 6. Stress-fit score (10%)
+    stress_score = _stress_fit_score(lyrics, phrase_map)
+
+    # 7. Density fit (5%)
     density_score = 0.5
     if phrase_map and lines:
         density_fits = []
@@ -451,7 +587,6 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> float:
             target_syl = phrase_map[i]["syllables"]
             actual_syl = sum(_count_syllables(w) for w in lines[i].split())
             dl = phrase_map[i].get("density_label", "mid")
-            # Dense bars should have more syllables; sparse should have fewer
             if dl == "dense" and actual_syl >= target_syl - 1:
                 density_fits.append(1.0)
             elif dl == "sparse" and actual_syl <= target_syl + 1:
@@ -461,11 +596,13 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> float:
         density_score = sum(density_fits) / len(density_fits) if density_fits else 0.5
 
     return round(
-        syllable_score * 0.50 +
-        rhyme_score    * 0.20 +
-        vowel_score    * 0.15 +
-        singability    * 0.10 +
-        density_score  * 0.05,
+        syllable_score * 0.45 +
+        rhyme_score    * 0.18 +
+        vowel_score    * 0.12 +
+        stress_score   * 0.10 +
+        singability    * 0.07 +
+        cap_score      * 0.05 +
+        density_score  * 0.03,
         3
     )
 
@@ -503,7 +640,11 @@ def generate_lyrics(
             "score":  _score_lyrics(lyrics, flow_data),
         })
 
+    # Pass 1: Haiku syllable verification
     results = _verify_and_fix(results, phrase_map)
+
+    # Pass 2: Auto-fix bars still off by >2 syllables using targeted regeneration
+    results = _autofix_weak_bars(results, flow_data, rough_text, tone, mode, vibe, gen_mode, key)
 
     for r in results:
         r["score"] = _score_lyrics(r["lyrics"], flow_data)

@@ -760,22 +760,32 @@ debugToggle.addEventListener("click", () => {
 const CONF_CLASS = { high: "conf-high", med: "conf-med", low: "conf-low" };
 const PITCH_ICON = { "↗ rising": "↗", "↘ falling": "↘", "~ held": "~", "→ flat": "→", "↕ staccato": "↕" };
 
+// Keep a reference so the CSV export can read it
+let _lastDebugPhrases = [];
+
 function renderDebugPanel(debugPhrases) {
   if (!debugPhrases || !debugPhrases.length) {
     debugSection.classList.add("hidden");
     return;
   }
 
+  _lastDebugPhrases = debugPhrases;
   debugSection.classList.remove("hidden");
+
   debugTableBody.innerHTML = debugPhrases.map((row) => {
-    const confCls = CONF_CLASS[row.confidence] || "";
+    const confCls   = CONF_CLASS[row.confidence] || "";
     const pitchIcon = PITCH_ICON[row.pitch] || row.pitch || "—";
-    const transcript = row.text ? escapeHtml(row.text.slice(0, 28)) + (row.text.length > 28 ? "…" : "") : '<em style="opacity:.4">melody</em>';
-    const pauseStr = row.pause_after > 0.15 ? `${row.pause_after.toFixed(1)}s` : "—";
+    const transcript = row.text
+      ? escapeHtml(row.text.slice(0, 28)) + (row.text.length > 28 ? "…" : "")
+      : '<em style="opacity:.4">melody</em>';
+    const pauseStr   = row.pause_after > 0.15 ? `${row.pause_after.toFixed(1)}s` : "—";
+    const flagBadge  = (row.flags || []).map(f =>
+      `<span class="debug-flag">${f}</span>`
+    ).join("");
 
     return `<tr>
       <td class="debug-bar">${row.bar}</td>
-      <td class="debug-text">${transcript}</td>
+      <td class="debug-text">${transcript}${flagBadge}</td>
       <td>${row.syllables}</td>
       <td>${row.duration}s</td>
       <td class="debug-pitch">${pitchIcon}</td>
@@ -786,3 +796,50 @@ function renderDebugPanel(debugPhrases) {
     </tr>`;
   }).join("");
 }
+
+/* ══════════════════════════════════════
+   BENCHMARK CSV EXPORT
+   Downloads a pre-filled CSV template
+   with audio analysis data + empty columns
+   for the user to fill in manually.
+   Columns: clip, bar, transcript, syl, dur,
+            pitch, density, energy, confidence,
+            expected_feel, feature_misread, fix_applied
+   ══════════════════════════════════════ */
+document.getElementById("benchmarkExportBtn").addEventListener("click", () => {
+  if (!_lastDebugPhrases.length) return;
+
+  const headers = [
+    "clip", "bar", "transcript", "syllables", "duration_s",
+    "pitch", "density", "energy", "confidence", "flags",
+    "expected_feel", "feature_misread", "fix_applied", "notes",
+  ];
+
+  const clipName = "clip_" + new Date().toISOString().slice(0, 10);
+
+  const rows = _lastDebugPhrases.map((row) => [
+    clipName,
+    row.bar,
+    `"${(row.text || "").replace(/"/g, '""')}"`,
+    row.syllables,
+    row.duration,
+    row.pitch || "—",
+    row.density || "—",
+    row.energy || "—",
+    row.confidence || "—",
+    (row.flags || []).join("+") || "—",
+    "", // expected_feel — fill in manually
+    "", // feature_misread — fill in manually
+    "", // fix_applied — fill in manually
+    "", // notes
+  ]);
+
+  const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `lyric-goat-benchmark-${clipName}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});

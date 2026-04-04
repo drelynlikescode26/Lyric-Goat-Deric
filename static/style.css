@@ -1259,6 +1259,58 @@ body {
 .conf-med  { color: var(--gold); }
 .conf-low  { color: var(--red); }
 
+.debug-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.debug-header-row .debug-intro { margin-bottom: 0; }
+
+.benchmark-export-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.benchmark-export-btn:hover {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.debug-flag {
+  display: inline-block;
+  background: rgba(124, 58, 237, 0.15);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  color: #a78bfa;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 5px;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+.debug-csv-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+  opacity: 0.7;
+}
+
 /* ── Responsive ── */
 @media (max-width: 480px) {
   body { padding: 16px 12px 60px; }

@@ -125,6 +125,11 @@ def extract_phrase_features(
         phrase["confidence"]       = round(conf, 2)
         phrase["confidence_label"] = "high" if conf >= 0.7 else ("med" if conf >= 0.4 else "low")
 
+        # ── Sustained vowel detection ────────────────────────────────────
+        phrase["is_sustained"] = _detect_sustained_vowel(
+            f0, voiced_flag, pitch_times, t_start, t_end, p_dur
+        )
+
     return phrase_map
 
 
@@ -221,6 +226,47 @@ def _estimate_confidence(word_count: int, duration: float, onset_density: float)
     return 0.45
 
 
+def _detect_sustained_vowel(
+    f0: np.ndarray,
+    voiced_flag: np.ndarray,
+    times: np.ndarray,
+    t_start: float,
+    t_end: float,
+    duration: float,
+) -> bool:
+    """
+    Returns True when the phrase is a held/sustained vowel sound
+    (e.g. "ooooh", "ayyyy", long melodic hold).
+
+    Criteria (all must pass):
+      - Duration >= 0.6s (long enough to be intentional)
+      - Voiced ratio >= 0.65 (mostly pitched, not noisy)
+      - Pitch CV < 0.10 (stable — not jumping around)
+    """
+    if duration < 0.6 or len(f0) == 0 or len(voiced_flag) == 0:
+        return False
+
+    mask = (times >= t_start) & (times <= t_end)
+    if not np.any(mask):
+        return False
+
+    voiced_ratio = float(np.mean(voiced_flag[mask]))
+    if voiced_ratio < 0.65:
+        return False
+
+    f0_win = f0[mask & voiced_flag]
+    f0_win = f0_win[~np.isnan(f0_win)]
+    if len(f0_win) < 4:
+        return False
+
+    mean_f0 = float(np.mean(f0_win))
+    if mean_f0 <= 0:
+        return False
+
+    cv = float(np.std(f0_win)) / mean_f0
+    return cv < 0.10
+
+
 def phrase_debug_summary(phrase_map: list) -> list:
     """
     Return a list of human-readable debug dicts for the UI debug panel.
@@ -228,6 +274,9 @@ def phrase_debug_summary(phrase_map: list) -> list:
     """
     rows = []
     for i, p in enumerate(phrase_map):
+        flags = []
+        if p.get("is_sustained"):
+            flags.append("sustained")
         rows.append({
             "bar":        i + 1,
             "text":       p.get("text", ""),
@@ -238,5 +287,6 @@ def phrase_debug_summary(phrase_map: list) -> list:
             "energy":     p.get("energy_level", "—"),
             "confidence": p.get("confidence_label", "—"),
             "pause_after": p.get("pause_after", 0),
+            "flags":      flags,
         })
     return rows
