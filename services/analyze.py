@@ -51,19 +51,39 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     all_words = [w["word"] for w in word_timestamps]
     vowel_data = _detect_vowel_patterns(all_words)
 
-    # Phrase detection
+    # Phrase detection — choose audio-based or transcript-based
     raw_phrases = _detect_phrases(word_timestamps, gap_threshold=0.35)
-    phrases = _split_long_phrases(raw_phrases, max_syllables=MAX_SYLLABLES_PER_BAR)
+    phrases     = _split_long_phrases(raw_phrases, max_syllables=MAX_SYLLABLES_PER_BAR)
 
-    if phrases:
+    # Decide whether transcript is usable.
+    # Criteria: must have ≥3 words AND transcript captured ≥30% of expected syllables.
+    enough_words = len(word_timestamps) >= 3
+    total_transcript_syls = sum(
+        sum(_count_syllables(w["word"]) for w in p) for p in phrases
+    ) if phrases else 0
+    onset_expected = len(onset_times)
+    transcript_too_sparse = (
+        onset_expected > 5 and total_transcript_syls < onset_expected * 0.30
+    )
+
+    if phrases and enough_words and not transcript_too_sparse:
         phrase_map = _build_phrase_map(phrases, beat_times)
+        melody_mode = vowel_data["is_repetitive"]
     else:
-        phrase_map = _build_melody_phrase_map(onset_times, beat_times)
+        # Transcript is unusable (pure mumble, melody, 1 word, etc.)
+        # Build phrase map entirely from audio analysis.
+        phrase_map = _build_melody_phrase_map(y, sr, onset_times, beat_times, duration)
+        melody_mode = True
 
     duration = round(float(len(y) / sr), 2)
 
     if phrase_map and phrase_map[-1].get("end_time", 0) <= phrase_map[-1]["start_time"]:
         phrase_map[-1]["end_time"] = duration
+
+    # For transcript-based maps with low-confidence phrases,
+    # correct syllable counts using audio energy peaks.
+    if not melody_mode:
+        phrase_map = _correct_syllables_from_audio(phrase_map, y, sr)
 
     # Enrich each phrase with full feature set
     phrase_map = extract_phrase_features(
@@ -74,8 +94,7 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     flow_map = _build_flow_map(word_timestamps, beat_times)
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
 
-    # Melody mode: too few words OR transcript is just repetitions
-    melody_mode = len(word_timestamps) < 3 or vowel_data["is_repetitive"]
+    # melody_mode is set during phrase detection above
 
     # Debug summary for the UI audit panel
     debug_phrases = phrase_debug_summary(phrase_map)
@@ -239,43 +258,134 @@ def _build_phrase_map(phrases: list, beat_times: np.ndarray) -> list:
     return phrase_map
 
 
-def _build_melody_phrase_map(onset_times: np.ndarray, beat_times: np.ndarray) -> list:
+def _build_melody_phrase_map(
+    y: np.ndarray,
+    sr: int,
+    onset_times: np.ndarray,
+    beat_times: np.ndarray,
+    total_duration: float,
+) -> list:
+    """
+    Build phrase map from audio alone — used when transcript is unusable.
+
+    Splits audio into phrase groups using onset gaps, then counts syllables
+    using RMS energy peaks (much more accurate than raw onset count for melody).
+    """
     if len(onset_times) == 0:
         return []
 
-    phrases, current = [], [float(onset_times[0])]
+    # Group onsets into phrase windows by gaps > 0.5s
+    groups, current = [], [float(onset_times[0])]
     for i in range(1, len(onset_times)):
-        if float(onset_times[i]) - float(onset_times[i - 1]) > 0.5:
-            phrases.append(current)
+        gap = float(onset_times[i]) - float(onset_times[i - 1])
+        if gap > 0.5:
+            groups.append(current)
             current = [float(onset_times[i])]
         else:
             current.append(float(onset_times[i]))
     if current:
-        phrases.append(current)
+        groups.append(current)
 
+    # Cap groups at MAX_SYLLABLES_PER_BAR by splitting large ones
     capped = []
-    for phrase in phrases:
-        while len(phrase) > MAX_SYLLABLES_PER_BAR:
-            capped.append(phrase[:MAX_SYLLABLES_PER_BAR])
-            phrase = phrase[MAX_SYLLABLES_PER_BAR:]
-        if phrase:
-            capped.append(phrase)
+    for g in groups:
+        while len(g) > MAX_SYLLABLES_PER_BAR:
+            capped.append(g[:MAX_SYLLABLES_PER_BAR])
+            g = g[MAX_SYLLABLES_PER_BAR:]
+        if g:
+            capped.append(g)
 
     phrase_map = []
-    for phrase in capped:
-        start_time = phrase[0]
-        end_time = phrase[-1]
+    for gi, group in enumerate(capped):
+        t_start = group[0]
+        # Phrase ends at start of next group (or total duration)
+        if gi + 1 < len(capped):
+            t_end = capped[gi + 1][0] - 0.05
+        else:
+            t_end = total_duration
+        t_end = max(t_end, t_start + 0.1)
+
+        # Count syllables from RMS energy peaks — more accurate for melody
+        syl_count = _count_syllables_from_audio(y, sr, t_start, t_end)
+
         beat_idx = 0
         if len(beat_times) > 0:
-            beat_idx = int(np.argmin(np.abs(beat_times - start_time)))
+            beat_idx = int(np.argmin(np.abs(beat_times - t_start)))
+
         phrase_map.append({
             "text":       "",
             "words":      [],
-            "syllables":  len(phrase),
-            "start_time": round(start_time, 2),
-            "end_time":   round(end_time, 2),
+            "syllables":  syl_count,
+            "start_time": round(t_start, 2),
+            "end_time":   round(t_end, 2),
             "beat_index": beat_idx,
         })
+
+    return phrase_map
+
+
+def _count_syllables_from_audio(y: np.ndarray, sr: int, t_start: float, t_end: float) -> int:
+    """
+    Count syllable-like energy peaks in a time window using RMS envelope.
+
+    Uses short-time RMS (25ms frames, 10ms hop) and finds local maxima
+    with minimum 80ms separation — the typical minimum syllable duration.
+    Falls back to onset count if scipy is unavailable.
+    """
+    s = max(0, int(t_start * sr))
+    e = min(len(y), int(t_end * sr))
+    seg = y[s:e]
+    if len(seg) < 100:
+        return 1
+
+    frame_len = max(64, int(0.025 * sr))
+    hop_len   = max(32, int(0.010 * sr))
+    rms = librosa.feature.rms(y=seg, frame_length=frame_len, hop_length=hop_len)[0]
+    if len(rms) < 3:
+        return 1
+
+    rms_norm = rms / (float(np.max(rms)) + 1e-9)
+    min_dist = max(1, int(0.08 / (hop_len / sr)))  # 80ms minimum syllable gap
+
+    try:
+        from scipy.signal import find_peaks
+        peaks, _ = find_peaks(rms_norm, distance=min_dist, prominence=0.12, height=0.15)
+        count = len(peaks)
+    except ImportError:
+        # Simple threshold crossing fallback
+        threshold, count, above = 0.25, 0, False
+        for val in rms_norm:
+            if val > threshold and not above:
+                count += 1
+                above = True
+            elif val <= threshold:
+                above = False
+
+    return max(1, min(count, MAX_SYLLABLES_PER_BAR))
+
+
+def _correct_syllables_from_audio(phrase_map: list, y: np.ndarray, sr: int) -> list:
+    """
+    For transcript-based phrases where Whisper underestimated syllables
+    (low confidence, very short word count vs duration), correct using
+    audio energy peaks.
+    """
+    for phrase in phrase_map:
+        conf = phrase.get("confidence_label", "med")
+        transcript_syls = phrase.get("syllables", 1)
+        t_start = phrase.get("start_time", 0)
+        t_end   = phrase.get("end_time", t_start + 0.5)
+        p_dur   = max(t_end - t_start, 0.1)
+
+        # Only correct when transcript seems sparse relative to audio duration
+        syls_per_sec = transcript_syls / p_dur
+        should_correct = conf == "low" or (syls_per_sec < 1.0 and not phrase.get("is_sustained", False))
+
+        if should_correct:
+            audio_syls = _count_syllables_from_audio(y, sr, t_start, t_end)
+            if audio_syls > transcript_syls:
+                phrase["syllables"] = audio_syls
+                phrase["syllable_source"] = "audio"
 
     return phrase_map
 

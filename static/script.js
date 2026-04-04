@@ -297,6 +297,49 @@ document.querySelectorAll(".key-quality-btn").forEach((btn) => {
 
 function checkReady() { generateBtn.disabled = !(recordedBlob || uploadedFile); }
 
+/* ══════════════════════════════════════
+   RESET + REGENERATE ALL
+   ══════════════════════════════════════ */
+document.getElementById("resetBtn").addEventListener("click", () => {
+  // Stop any playback / sync
+  stopSync();
+  stopMetronome();
+  if (!audioPreview.paused) audioPreview.pause();
+
+  // Clear audio state
+  recordedBlob = null;
+  uploadedFile = null;
+  audioChunks  = [];
+  currentPhraseMap = [];
+  currentRoughText = "";
+  currentFlowData  = {};
+  lockedLines      = {};
+  _lastDebugPhrases = [];
+
+  // Reset UI controls
+  audioPreview.src = "";
+  audioPreview.classList.add("hidden");
+  recordBtn.classList.remove("has-audio", "recording");
+  recordLabel.textContent = "Start Recording";
+  recordingStatus.classList.add("hidden");
+  fileInput.value = "";
+  uploadText.textContent = "Upload Audio File";
+  uploadLabel.classList.remove("has-file");
+
+  // Hide results
+  resultsSection.classList.add("hidden");
+  versionsContainer.innerHTML = "";
+
+  // Scroll to top and focus
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  generateBtn.disabled = true;
+});
+
+document.getElementById("regenerateAllBtn").addEventListener("click", () => {
+  if (!(recordedBlob || uploadedFile)) return;
+  generateBtn.click();
+});
+
 /* ══════════════════
    GENERATE
    ══════════════════ */

@@ -3,20 +3,21 @@ from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Musical context prompt — biases Whisper toward rap/singing vocabulary
-# and away from misinterpreting melody as speech noise.
+# Biases Whisper toward recognizing melodic/rap vocal content.
+# Long list of filler sounds so Whisper maps "mmm" / "ayy" / "ooh"
+# to real tokens rather than hallucinating random words.
 WHISPER_PROMPT = (
-    "hip hop rap lyrics mumble singing melody hook verse chorus "
-    "yeah ayy aye ooh nah gonna wanna tryna gotta"
+    "hip hop rap lyrics mumble singing vocal melody hook verse chorus "
+    "yeah ayy ay aye ooh oh woah nah gonna wanna tryna gotta "
+    "mm hmm ah la da ba bo doo woo hey yo na na "
+    "singing humming melody vocal run riff ad-lib"
 )
 
 
 def transcribe_audio(audio_path: str) -> dict:
     """
     Transcribe audio using OpenAI Whisper with music-optimized settings.
-    - prompt: biases vocabulary toward rap/singing
-    - temperature=0: deterministic, most accurate decode
-    - word timestamps: needed for phrase detection and karaoke sync
+    Returns text, word-level timestamps, and audio duration.
     """
     with open(audio_path, "rb") as f:
         response = client.audio.transcriptions.create(
@@ -26,20 +27,20 @@ def transcribe_audio(audio_path: str) -> dict:
             timestamp_granularities=["word"],
             language="en",
             prompt=WHISPER_PROMPT,
-            temperature=0,
+            temperature=0.1,  # slight randomness helps with melodic mumbles vs. strict 0
         )
 
     words = []
     if hasattr(response, "words") and response.words:
         for w in response.words:
             words.append({
-                "word": w.word,
+                "word":  w.word,
                 "start": w.start,
-                "end": w.end,
+                "end":   w.end,
             })
 
     return {
-        "text": response.text.strip(),
-        "words": words,
+        "text":     response.text.strip(),
+        "words":    words,
         "duration": response.duration if hasattr(response, "duration") else None,
     }

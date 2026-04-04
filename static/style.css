@@ -1165,6 +1165,53 @@ body {
 /* ── Utilities ── */
 .hidden { display: none !important; }
 
+/* ── Results Action Bar ── */
+.results-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0 8px;
+}
+
+.results-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.results-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.results-action-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.12s;
+}
+
+.results-action-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.results-action-btn--reset {
+  color: var(--text-muted);
+}
+
+.results-action-btn--reset:hover {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.06);
+}
+
 /* ── Debug / Audit Panel ── */
 .debug-section {
   border: 1px solid var(--border);
