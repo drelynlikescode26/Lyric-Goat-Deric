@@ -552,7 +552,9 @@ function createVersionCard(version, isBest, phraseMap) {
     <div class="card-actions">
       <button class="copy-btn" data-lyrics="${encodeURIComponent(version.lyrics || "")}">Copy</button>
       ${phraseMap.length ? '<button class="sync-btn">▶ Play Synced</button>' : ""}
+      ${version.score_breakdown ? '<button class="score-breakdown-btn">Why this won ▾</button>' : ""}
     </div>
+    ${version.score_breakdown ? buildScoreBreakdownPanel(version.score_breakdown) : ""}
   `;
 
   // Copy
@@ -739,6 +741,67 @@ function escapeHtml(str) {
 }
 
 /* ══════════════════════════════════════
+   SCORE BREAKDOWN ("Why this won")
+   Expandable panel per version card.
+   Shows per-factor score contributions
+   and overflow penalty if present.
+   ══════════════════════════════════════ */
+const SCORE_LABELS = {
+  syllable_fit:   "Syllable fit",
+  word_count_fit: "Word-count fit",
+  stress_fit:     "Stress fit",
+  rhyme:          "Rhyme density",
+  vowel_affinity: "Vowel affinity",
+  singability:    "Singability",
+  density_fit:    "Density fit",
+};
+const SCORE_WEIGHTS_UI = {
+  syllable_fit: 0.35, word_count_fit: 0.15, stress_fit: 0.15,
+  rhyme: 0.15, vowel_affinity: 0.05, singability: 0.10, density_fit: 0.05,
+};
+
+function buildScoreBreakdownPanel(bd) {
+  if (!bd) return "";
+
+  const rows = Object.entries(SCORE_LABELS).map(([key, label]) => {
+    const raw   = bd[key] ?? 0;
+    const wt    = SCORE_WEIGHTS_UI[key] ?? 0;
+    const contribution = raw * wt;
+    const barW  = Math.round(raw * 100);
+    return `<div class="sbd-row">
+      <span class="sbd-label">${label}</span>
+      <div class="sbd-bar-wrap"><div class="sbd-bar" style="width:${barW}%"></div></div>
+      <span class="sbd-raw">${Math.round(raw * 100)}%</span>
+      <span class="sbd-contrib">+${contribution.toFixed(3)}</span>
+    </div>`;
+  }).join("");
+
+  const overflowWarn = (bd.overflow_bars || []).length
+    ? `<div class="sbd-overflow-warn">⚠ Overflow penalty (×${0.45}) — bars: ${bd.overflow_bars.join(", ")}</div>`
+    : "";
+
+  return `<div class="score-breakdown-panel hidden">
+    ${rows}
+    <div class="sbd-total">
+      <span>TOTAL</span>
+      <span class="sbd-total-val">${Math.round((bd.total || 0) * 100)}%</span>
+    </div>
+    ${overflowWarn}
+  </div>`;
+}
+
+// Wire "Why this won" toggle (uses event delegation on versionsContainer)
+versionsContainer.addEventListener("click", (e) => {
+  const btn = e.target.closest(".score-breakdown-btn");
+  if (!btn) return;
+  const panel = btn.closest(".version-card").querySelector(".score-breakdown-panel");
+  if (!panel) return;
+  const open = !panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", open);
+  btn.textContent = open ? "Why this won ▾" : "Why this won ▴";
+});
+
+/* ══════════════════════════════════════
    DEBUG / AUDIT PANEL
    Per-phrase audio analysis table.
    Shows pitch, density, energy, confidence
@@ -776,23 +839,37 @@ function renderDebugPanel(debugPhrases) {
     const confCls   = CONF_CLASS[row.confidence] || "";
     const pitchIcon = PITCH_ICON[row.pitch] || row.pitch || "—";
     const transcript = row.text
-      ? escapeHtml(row.text.slice(0, 28)) + (row.text.length > 28 ? "…" : "")
+      ? escapeHtml(row.text.slice(0, 24)) + (row.text.length > 24 ? "…" : "")
       : '<em style="opacity:.4">melody</em>';
-    const pauseStr   = row.pause_after > 0.15 ? `${row.pause_after.toFixed(1)}s` : "—";
-    const flagBadge  = (row.flags || []).map(f =>
-      `<span class="debug-flag">${f}</span>`
+    const pauseStr  = row.pause_after > 0.15 ? `${row.pause_after.toFixed(1)}s` : "—";
+    const lwPct     = typeof row.literal_weight === "number"
+      ? `${Math.round(row.literal_weight * 100)}%` : "—";
+    const svrPct    = typeof row.sustained_vowel_ratio === "number"
+      ? `${Math.round(row.sustained_vowel_ratio * 100)}%` : "—";
+    const flagBadges = (row.flags || []).map(f =>
+      `<span class="debug-flag debug-flag--${f.replace(/[^a-z]/g, "-")}">${f}</span>`
     ).join("");
 
-    return `<tr>
+    // Row-level warning class
+    const rowCls = (row.flags || []).length ? "debug-row-warn" : "";
+
+    return `<tr class="${rowCls}">
       <td class="debug-bar">${row.bar}</td>
-      <td class="debug-text">${transcript}${flagBadge}</td>
+      <td class="debug-text">${transcript}</td>
       <td>${row.syllables}</td>
       <td>${row.duration}s</td>
       <td class="debug-pitch">${pitchIcon}</td>
       <td>${row.density || "—"}</td>
       <td>${row.energy || "—"}</td>
-      <td class="debug-conf ${confCls}">${row.confidence || "—"}</td>
+      <td class="debug-conf ${confCls}" title="score: ${row.confidence_score || ""}">${row.confidence || "—"}</td>
+      <td class="debug-lw">${lwPct}</td>
+      <td>${row.max_words ?? "—"}</td>
+      <td>${row.max_syllables ?? "—"}</td>
+      <td>${svrPct}</td>
+      <td>${row.vowel_family_hint || "—"}</td>
+      <td>${row.word_length_profile || "—"}</td>
       <td>${pauseStr}</td>
+      <td>${flagBadges}</td>
     </tr>`;
   }).join("");
 }

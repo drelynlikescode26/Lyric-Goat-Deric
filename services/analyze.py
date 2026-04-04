@@ -65,8 +65,11 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     if phrase_map and phrase_map[-1].get("end_time", 0) <= phrase_map[-1]["start_time"]:
         phrase_map[-1]["end_time"] = duration
 
-    # Enrich each phrase with pitch contour, density, energy, confidence
-    phrase_map = extract_phrase_features(y, sr, phrase_map, onset_times, duration)
+    # Enrich each phrase with full feature set
+    phrase_map = extract_phrase_features(
+        y, sr, phrase_map, onset_times, duration,
+        global_vowel_family=vowel_data["vowel_family"],
+    )
 
     flow_map = _build_flow_map(word_timestamps, beat_times)
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
