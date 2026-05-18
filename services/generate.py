@@ -125,20 +125,23 @@ HARD PERFORMANCE RULES (never violate):
 
 def _phrase_block(phrase: dict, idx: int, anchor: str, gen_mode: str, melody_mode: bool) -> str:
     """Build the constraint spec for a single bar in the prompt."""
-    syl          = phrase.get("syllables", 4)
-    max_w        = phrase.get("max_words", 5)
-    max_s        = phrase.get("max_syllables", syl + 1)
-    pitch        = phrase.get("pitch_symbol", "")
-    density      = phrase.get("density_label", "mid")
-    energy       = phrase.get("energy_level", "mid")
-    conf_lbl     = phrase.get("confidence_label", "med")
-    lw           = phrase.get("literal_weight", 0.55)
-    sustain      = phrase.get("is_sustained", False)
-    svr          = phrase.get("sustained_vowel_ratio", 0)
-    wlp          = phrase.get("word_length_profile", "any")
-    pause_af     = phrase.get("pause_after", 0)
-    vowel_hint   = phrase.get("vowel_family_hint", "neutral")
-    text         = phrase.get("text", "")
+    syl            = phrase.get("syllables", 4)
+    target_syl     = phrase.get("target_syllables", syl)
+    note_count     = phrase.get("note_count", 0)
+    max_w          = phrase.get("max_words", 5)
+    max_s          = phrase.get("max_syllables", syl + 1)
+    pitch          = phrase.get("pitch_symbol", "")
+    density        = phrase.get("density_label", "mid")
+    energy         = phrase.get("energy_level", "mid")
+    conf_lbl       = phrase.get("confidence_label", "med")
+    lw             = phrase.get("literal_weight", 0.55)
+    sustain        = phrase.get("is_sustained", False)
+    svr            = phrase.get("sustained_vowel_ratio", 0)
+    wlp            = phrase.get("word_length_profile", "any")
+    pause_af       = phrase.get("pause_after", 0)
+    vowel_hint     = phrase.get("vowel_family_hint", "neutral")
+    note_pitch_rng = phrase.get("note_pitch_range", 0)
+    text           = phrase.get("text", "")
 
     parts = [f"  Bar {idx + 1}:"]
 
@@ -147,13 +150,19 @@ def _phrase_block(phrase: dict, idx: int, anchor: str, gen_mode: str, melody_mod
     if force_cadence or not text:
         parts.append("(rhythm)")
     else:
-        # Partial literal: include text only if lw is high enough
         if lw >= 0.70:
             parts.append(f'"{text}"')
         else:
-            parts.append(f'(~"{text}")')  # tilde = rough reference, not literal
+            parts.append(f'(~"{text}")')
 
-    parts.append(f"→ {syl} syl  [max {max_w} words | max {max_s} syl]")
+    # Use note_count as the authoritative syllable target when available.
+    # "EXACTLY N syllables" is the syllable-per-note alignment constraint.
+    if note_count > 0 and note_count == target_syl:
+        parts.append(f"→ EXACTLY {note_count} syllables (one per note)  [max {max_w} words]")
+    elif target_syl > 0:
+        parts.append(f"→ {target_syl} syl target  [max {max_w} words | hard cap {max_s} syl]")
+    else:
+        parts.append(f"→ {syl} syl  [max {max_w} words | max {max_s} syl]")
 
     # Audio metadata
     meta = []
@@ -165,6 +174,12 @@ def _phrase_block(phrase: dict, idx: int, anchor: str, gen_mode: str, melody_mod
         meta.append(f"{energy} energy")
     if meta:
         parts.append(f"[{' | '.join(meta)}]")
+
+    # Pitch range hint: wide range = expressive melody, narrow = monotone/spoken
+    if note_pitch_rng >= 7:
+        parts.append("[melodic — wide pitch movement, choose singable words]")
+    elif note_pitch_rng >= 3:
+        parts.append("[moderate pitch movement]")
 
     # Constraint hints
     if sustain or (svr >= 0.55 and not text):
@@ -398,7 +413,7 @@ def _autofix_weak_bars(
         for i, phrase in enumerate(phrase_map):
             if i >= len(lines):
                 break
-            target = phrase["syllables"]
+            target = phrase.get("target_syllables", phrase["syllables"])
             actual = sum(_count_syllables(w) for w in lines[i].split())
             if abs(actual - target) > 2:
                 candidate = generate_single_line(
@@ -429,12 +444,13 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> tuple[float, dict]:
     vowel_family = flow_data.get("vowel_family")
     pairs = min(len(lines), len(phrase_map))
 
-    # 1. Syllable fit
+    # 1. Syllable fit — use target_syllables (note-map derived) when available
     if phrase_map and pairs:
         diffs = [
             max(0.0, 1.0 - abs(
-                sum(_count_syllables(w) for w in lines[i].split()) - phrase_map[i]["syllables"]
-            ) / max(phrase_map[i]["syllables"], 1))
+                sum(_count_syllables(w) for w in lines[i].split()) -
+                phrase_map[i].get("target_syllables", phrase_map[i]["syllables"])
+            ) / max(phrase_map[i].get("target_syllables", phrase_map[i]["syllables"]), 1))
             for i in range(pairs)
         ]
         syllable_fit = sum(diffs) / pairs
