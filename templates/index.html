@@ -22,6 +22,30 @@
       <p class="tagline">Mumble → Lyrics. Your flow. Your words.</p>
     </header>
 
+    <!-- Song Workspace -->
+    <section class="workspace-bar" id="workspaceBar">
+      <div class="workspace-song-row">
+        <div class="workspace-song-picker">
+          <span class="workspace-icon">🎵</span>
+          <button class="song-select-btn" id="songSelectBtn" type="button">
+            <span id="currentSongTitle">No song selected</span>
+            <span class="song-select-arrow">▾</span>
+          </button>
+          <div class="song-dropdown hidden" id="songDropdown"></div>
+        </div>
+        <div class="workspace-song-actions">
+          <button class="ws-btn ws-btn-ghost hidden" id="viewSongBtn" type="button">⤢ View Song</button>
+          <button class="ws-btn" id="newSongBtn" type="button">+ New Song</button>
+        </div>
+      </div>
+      <div class="workspace-arrangement hidden" id="workspaceArrangement">
+        <div class="arrangement-label">ARRANGEMENT
+          <span class="arrangement-hint" id="activeSectionHint"></span>
+        </div>
+        <div class="arrangement-sections" id="arrangementSections"></div>
+      </div>
+    </section>
+
     <!-- Tips Section -->
     <section class="tips-section">
       <button class="tips-toggle" id="tipsToggle">
@@ -341,6 +365,55 @@
       </div>
 
     </section>
+
+    <!-- New Song Modal -->
+    <div class="modal-overlay hidden" id="newSongModal">
+      <div class="modal">
+        <h3 class="modal-title">New Song</h3>
+        <input type="text" class="modal-input" id="newSongTitle" placeholder="Song title — e.g. Blueberry Flago" maxlength="120" />
+        <div class="modal-actions">
+          <button class="ws-btn ws-btn-ghost" id="newSongCancel" type="button">Cancel</button>
+          <button class="ws-btn" id="newSongCreate" type="button">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Section Modal -->
+    <div class="modal-overlay hidden" id="addSectionModal">
+      <div class="modal">
+        <h3 class="modal-title">Add Section</h3>
+        <p class="modal-sub">Pick what part of the song you're building.</p>
+        <div class="section-type-grid">
+          <button class="section-type-btn" data-type="intro" type="button">Intro</button>
+          <button class="section-type-btn" data-type="verse" type="button">Verse</button>
+          <button class="section-type-btn" data-type="pre-chorus" type="button">Pre-Chorus</button>
+          <button class="section-type-btn" data-type="hook" type="button">Hook</button>
+          <button class="section-type-btn" data-type="bridge" type="button">Bridge</button>
+          <button class="section-type-btn" data-type="outro" type="button">Outro</button>
+        </div>
+        <div class="modal-actions">
+          <button class="ws-btn ws-btn-ghost" id="addSectionCancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- View Song Modal -->
+    <div class="modal-overlay hidden" id="viewSongModal">
+      <div class="modal modal-large">
+        <div class="modal-header">
+          <h3 class="modal-title" id="viewSongTitle">Song</h3>
+          <button class="modal-close" id="viewSongClose" type="button">✕</button>
+        </div>
+        <div class="full-song-body" id="fullSongBody"></div>
+        <div class="modal-actions">
+          <button class="ws-btn ws-btn-ghost" id="deleteSongBtn" type="button">Delete Song</button>
+          <button class="ws-btn" id="copyFullSong" type="button">Copy Full Song</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="ws-toast hidden" id="wsToast"></div>
 
   </div>
 

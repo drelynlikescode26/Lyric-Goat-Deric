@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +13,7 @@ from services.transcribe import transcribe_audio
 from services.analyze import analyze_flow, preanalyze_audio, syllable_rhythm_string
 from services.generate import generate_lyrics, generate_single_line
 from services.preprocess import preprocess
+from services import projects
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -138,6 +139,128 @@ def regenerate_line():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Song Workspace API ───────────────────────────────────────────────────────
+
+@app.route("/api/songs", methods=["GET"])
+def api_list_songs():
+    return jsonify({"success": True, "songs": projects.list_songs()})
+
+
+@app.route("/api/songs", methods=["POST"])
+def api_create_song():
+    data = request.get_json(silent=True) or {}
+    title = data.get("title", "Untitled")
+    song = projects.create_song(
+        title,
+        bpm=int(data.get("bpm", 90) or 90),
+        key=data.get("key", "auto"),
+        genre=data.get("genre", "hiphop"),
+    )
+    return jsonify({"success": True, "song": song})
+
+
+@app.route("/api/songs/<song_id>", methods=["GET"])
+def api_get_song(song_id):
+    song = projects.get_song(song_id)
+    if song is None:
+        return jsonify({"error": "Song not found"}), 404
+    return jsonify({"success": True, "song": song})
+
+
+@app.route("/api/songs/<song_id>", methods=["PUT"])
+def api_update_song(song_id):
+    data = request.get_json(silent=True) or {}
+    song = projects.update_song(
+        song_id,
+        title=data.get("title"),
+        bpm=data.get("bpm"),
+        key=data.get("key"),
+        genre=data.get("genre"),
+    )
+    if song is None:
+        return jsonify({"error": "Song not found"}), 404
+    return jsonify({"success": True, "song": song})
+
+
+@app.route("/api/songs/<song_id>", methods=["DELETE"])
+def api_delete_song(song_id):
+    ok = projects.delete_song(song_id)
+    return jsonify({"success": ok})
+
+
+@app.route("/api/songs/<song_id>/sections", methods=["POST"])
+def api_add_section(song_id):
+    data = request.get_json(silent=True) or {}
+    section = projects.add_section(song_id, data)
+    if section is None:
+        return jsonify({"error": "Song not found"}), 404
+    return jsonify({"success": True, "section": section})
+
+
+@app.route("/api/songs/<song_id>/sections/<section_id>", methods=["PUT"])
+def api_update_section(song_id, section_id):
+    data = request.get_json(silent=True) or {}
+    section = projects.update_section(song_id, section_id, data)
+    if section is None:
+        return jsonify({"error": "Section not found"}), 404
+    return jsonify({"success": True, "section": section})
+
+
+@app.route("/api/songs/<song_id>/sections/<section_id>", methods=["DELETE"])
+def api_delete_section(song_id, section_id):
+    ok = projects.delete_section(song_id, section_id)
+    return jsonify({"success": ok})
+
+
+@app.route("/api/songs/<song_id>/reorder", methods=["POST"])
+def api_reorder_sections(song_id):
+    data = request.get_json(silent=True) or {}
+    song = projects.reorder_sections(song_id, data.get("order", []))
+    if song is None:
+        return jsonify({"error": "Song not found"}), 404
+    return jsonify({"success": True, "song": song})
+
+
+@app.route("/api/songs/<song_id>/sections/<section_id>/audio", methods=["POST"])
+def api_save_section_audio(song_id, section_id):
+    if "audio" not in request.files or request.files["audio"].filename == "":
+        return jsonify({"error": "No audio provided"}), 400
+    f = request.files["audio"]
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else "webm"
+    tmp = tempfile.NamedTemporaryFile(suffix=f".{ext}", dir=UPLOAD_FOLDER, delete=False)
+    f.save(tmp.name)
+    try:
+        filename = projects.save_section_audio(song_id, section_id, tmp.name, ext)
+        if filename is None:
+            return jsonify({"error": "Song or section not found"}), 404
+        return jsonify({"success": True, "audio_file": filename})
+    finally:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+
+
+@app.route("/api/songs/<song_id>/sections/<section_id>/audio", methods=["GET"])
+def api_get_section_audio(song_id, section_id):
+    song = projects.get_song(song_id)
+    if song is None:
+        return jsonify({"error": "Song not found"}), 404
+    section = next((s for s in song.get("sections", []) if s["id"] == section_id), None)
+    if section is None or not section.get("audio_file"):
+        return jsonify({"error": "No audio"}), 404
+    path = projects.audio_path(section["audio_file"])
+    if path is None:
+        return jsonify({"error": "Audio file missing"}), 404
+    return send_file(str(path))
+
+
+@app.route("/api/songs/<song_id>/export", methods=["GET"])
+def api_export_song(song_id):
+    text = projects.assemble_song_text(song_id)
+    if not text:
+        return jsonify({"error": "Song not found"}), 404
+    return jsonify({"success": True, "text": text})
 
 
 if __name__ == "__main__":

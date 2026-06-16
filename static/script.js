@@ -448,6 +448,8 @@ function renderResults(data) {
     data.melody_mode  ? `<div class="stat-chip melody-chip"><strong>melody mode</strong></div>` : "",
   ].join("");
 
+  workspace._lastVersions = data.versions || [];
+
   versionsContainer.innerHTML = "";
   (data.versions || []).forEach((v, idx) => {
     versionsContainer.appendChild(createVersionCard(v, idx === 0, currentPhraseMap));
@@ -610,6 +612,7 @@ function createVersionCard(version, isBest, phraseMap) {
     <div class="card-actions">
       <button class="copy-btn" data-lyrics="${encodeURIComponent(version.lyrics || "")}">Copy</button>
       ${phraseMap.length ? '<button class="sync-btn">▶ Play Synced</button>' : ""}
+      <button class="save-section-btn" title="Save this version into the current song section">💾 Save to Song</button>
       ${version.score_breakdown ? '<button class="score-breakdown-btn">Why this won ▾</button>' : ""}
     </div>
     ${version.score_breakdown ? buildScoreBreakdownPanel(version.score_breakdown) : ""}
@@ -630,6 +633,12 @@ function createVersionCard(version, isBest, phraseMap) {
     syncBtn.addEventListener("click", () => {
       activeSyncCard === card ? stopSync() : startSync(card, syncBtn, phraseMap);
     });
+  }
+
+  // Save version to current song section
+  const saveBtn = card.querySelector(".save-section-btn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => saveVersionToSection(version, saveBtn));
   }
 
   // Lock buttons
@@ -978,3 +987,414 @@ document.getElementById("benchmarkExportBtn").addEventListener("click", () => {
   a.click();
   URL.revokeObjectURL(url);
 });
+
+/* ══════════════════════════════════════════════════════════
+   SONG WORKSPACE
+   Songs (projects) → sections (verse, hook, bridge...).
+   Each section holds its hum + generated lyrics, persisted
+   on the backend so a whole song can be built piece by piece.
+   ══════════════════════════════════════════════════════════ */
+const workspace = {
+  songs: [],
+  currentSong: null,
+  activeSectionId: null,
+  _lastVersions: [],
+};
+
+const SECTION_LABELS = {
+  intro: "Intro", verse: "Verse", "pre-chorus": "Pre-Chorus",
+  hook: "Hook", bridge: "Bridge", outro: "Outro",
+};
+
+const arrangementSectionsEl = document.getElementById("arrangementSections");
+const currentSongTitleEl    = document.getElementById("currentSongTitle");
+const activeSectionHintEl   = document.getElementById("activeSectionHint");
+const songDropdownEl        = document.getElementById("songDropdown");
+
+/* ── UI sync helpers ── */
+function selectPill(group, value) {
+  const grp = document.querySelector(`.pill-group[data-group="${group}"]`);
+  if (!grp) return;
+  grp.querySelectorAll(".pill").forEach((p) =>
+    p.classList.toggle("active", p.dataset.value === value));
+  state[group] = value;
+}
+
+function selectKey(root, quality) {
+  document.querySelectorAll(".key-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.key === root));
+  if (quality) {
+    document.querySelectorAll(".key-quality-btn").forEach((b) =>
+      b.classList.toggle("active", b.dataset.quality === quality));
+    state.keyQuality = quality;
+  }
+  state.key = root;
+}
+
+function applySongSettings(song) {
+  if (song.bpm) setBpm(song.bpm);
+  if (song.genre) selectPill("genre", song.genre);
+  if (song.key && song.key !== "auto") {
+    const parts = song.key.split(" ");
+    selectKey(parts[0], parts[1] || "major");
+  }
+}
+
+function blobExt(blob) {
+  const t = (blob.type || "");
+  if (t.includes("ogg"))  return "ogg";
+  if (t.includes("mp4"))  return "mp4";
+  if (t.includes("mpeg")) return "mp3";
+  if (t.includes("wav"))  return "wav";
+  return "webm";
+}
+
+let _wsToastTimer = null;
+function wsToast(msg) {
+  const t = document.getElementById("wsToast");
+  t.textContent = msg;
+  t.classList.remove("hidden");
+  clearTimeout(_wsToastTimer);
+  _wsToastTimer = setTimeout(() => t.classList.add("hidden"), 2600);
+}
+
+function currentSectionLabel(id) {
+  const sec = ((workspace.currentSong || {}).sections || []).find((s) => s.id === id);
+  return sec ? sec.label : "section";
+}
+
+/* ── Songs: load / render ── */
+async function loadSongs() {
+  try {
+    const res  = await fetch("/api/songs");
+    const data = await res.json();
+    workspace.songs = data.songs || [];
+    renderSongDropdown();
+    if (workspace.songs.length && !workspace.currentSong) {
+      await loadSong(workspace.songs[0].id);
+    }
+  } catch (e) { /* backend unreachable — workspace stays empty */ }
+}
+
+function renderSongDropdown() {
+  if (!workspace.songs.length) {
+    songDropdownEl.innerHTML = `<div class="song-dropdown-empty">No songs yet — hit “New Song”</div>`;
+    return;
+  }
+  songDropdownEl.innerHTML = workspace.songs.map((s) => {
+    const active = workspace.currentSong && workspace.currentSong.id === s.id ? "active" : "";
+    const parts = s.section_count === 1 ? "part" : "parts";
+    return `<button class="song-dropdown-item ${active}" data-id="${s.id}" type="button">
+      <span class="song-dd-title">${escapeHtml(s.title)}</span>
+      <span class="song-dd-meta">${s.section_count} ${parts} · ${s.bpm} BPM</span>
+    </button>`;
+  }).join("");
+}
+
+async function loadSong(id) {
+  const res  = await fetch(`/api/songs/${id}`);
+  const data = await res.json();
+  if (!data.success) return;
+  workspace.currentSong = data.song;
+
+  const sections = data.song.sections || [];
+  const stillValid = sections.some((s) => s.id === workspace.activeSectionId);
+  if (!stillValid) {
+    const firstEmpty = sections.find((s) => !(s.lyrics && s.lyrics.trim()));
+    workspace.activeSectionId = firstEmpty ? firstEmpty.id : (sections[0] ? sections[0].id : null);
+  }
+
+  currentSongTitleEl.textContent = data.song.title;
+  document.getElementById("workspaceArrangement").classList.remove("hidden");
+  document.getElementById("viewSongBtn").classList.remove("hidden");
+  applySongSettings(data.song);
+  renderArrangement();
+  renderSongDropdown();
+  updateActiveHint();
+}
+
+function updateActiveHint() {
+  const sec = ((workspace.currentSong || {}).sections || [])
+    .find((s) => s.id === workspace.activeSectionId);
+  activeSectionHintEl.textContent = sec ? `· recording into ${sec.label}` : "";
+}
+
+/* ── Arrangement (section chips) ── */
+function renderArrangement() {
+  const sections = (workspace.currentSong && workspace.currentSong.sections) || [];
+  arrangementSectionsEl.innerHTML = sections.map((s) => {
+    const filled = (s.lyrics && s.lyrics.trim()) ? "filled" : "";
+    const active = s.id === workspace.activeSectionId ? "active" : "";
+    const mark   = filled ? '<span class="section-chip-check">✓</span>'
+                          : '<span class="section-chip-empty">○</span>';
+    return `<div class="section-chip ${filled} ${active}" data-id="${s.id}">
+      <span class="section-chip-label">${escapeHtml(s.label)}</span>
+      ${mark}
+      <span class="section-chip-del" data-del="${s.id}" title="Delete section">✕</span>
+    </div>`;
+  }).join("") + `<button class="section-add-btn" id="addSectionChip" type="button">+ Section</button>`;
+}
+
+arrangementSectionsEl.addEventListener("click", (e) => {
+  const del = e.target.closest(".section-chip-del");
+  if (del) { e.stopPropagation(); deleteSection(del.dataset.del); return; }
+  if (e.target.closest("#addSectionChip")) { openAddSectionModal(); return; }
+  const chip = e.target.closest(".section-chip");
+  if (chip) setActiveSection(chip.dataset.id, true);
+});
+
+function setActiveSection(id, openIt = true) {
+  workspace.activeSectionId = id;
+  renderArrangement();
+  updateActiveHint();
+  const sec = ((workspace.currentSong || {}).sections || []).find((s) => s.id === id);
+  if (openIt && sec && sec.lyrics && sec.lyrics.trim()) openSavedSection(sec);
+}
+
+/* ── Re-open a saved section in the results view ── */
+function openSavedSection(section) {
+  const versions = (section.versions && section.versions.length)
+    ? section.versions
+    : [{ name: "saved", label: section.label, lyrics: section.lyrics || "", score: 1, score_breakdown: null }];
+  const pm = section.phrase_map || [];
+  const data = {
+    success: true,
+    rough_text: section.rough_text || "",
+    phrase_map: pm,
+    melody_mode: !!(section.settings && section.settings.hum_mode),
+    detected_key: (section.settings && section.settings.key) || null,
+    vowel_family: null,
+    is_repetitive: false,
+    debug_phrases: [],
+    flow: {
+      tempo_bpm: section.settings && section.settings.bpm,
+      flow_style: "saved",
+      syllable_count: pm.reduce((a, p) => a + (p.syllables || 0), 0),
+      duration: pm.length ? (pm[pm.length - 1].end_time || 0) : 0,
+    },
+    versions,
+  };
+  renderResults(data);
+  if (section.audio_file && workspace.currentSong) {
+    audioPreview.src = `/api/songs/${workspace.currentSong.id}/sections/${section.id}/audio`;
+    audioPreview.classList.remove("hidden");
+  }
+}
+
+/* ── Sections: add / delete / save ── */
+async function addSection(type) {
+  if (!workspace.currentSong) return null;
+  const songId   = workspace.currentSong.id;
+  const sections = workspace.currentSong.sections || [];
+  const sameType = sections.filter((s) => s.type === type).length;
+  const base     = SECTION_LABELS[type] || type;
+  const label    = (type === "verse")
+    ? `Verse ${sameType + 1}`
+    : (sameType > 0 ? `${base} ${sameType + 1}` : base);
+
+  const res = await fetch(`/api/songs/${songId}/sections`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, label }),
+  });
+  const data = await res.json();
+  if (!data.success) return null;
+  await loadSong(songId);
+  setActiveSection(data.section.id, false);
+  return data.section;
+}
+
+async function deleteSection(id) {
+  if (!workspace.currentSong) return;
+  if (!confirm("Delete this section?")) return;
+  const songId = workspace.currentSong.id;
+  await fetch(`/api/songs/${songId}/sections/${id}`, { method: "DELETE" });
+  if (workspace.activeSectionId === id) workspace.activeSectionId = null;
+  await loadSong(songId);
+  wsToast("Section deleted");
+}
+
+async function saveVersionToSection(version, btn) {
+  if (!workspace.currentSong) {
+    openNewSongModal();
+    wsToast("Create a song first, then save");
+    return;
+  }
+  let sectionId = workspace.activeSectionId;
+  if (!sectionId) {
+    const sec = await addSection("verse");
+    if (!sec) return;
+    sectionId = sec.id;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+
+  const songId   = workspace.currentSong.id;
+  const settings = {
+    tone: state.tone, mode: state.mode, vibe: state.vibe,
+    gen_mode: state.gen_mode, genre: state.genre, hum_mode: state.humMode,
+    key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
+    bpm: metroBpm,
+  };
+
+  try {
+    const res = await fetch(`/api/songs/${songId}/sections/${sectionId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lyrics: version.lyrics || "",
+        rough_text: currentRoughText,
+        phrase_map: currentPhraseMap,
+        versions: workspace._lastVersions || [],
+        settings,
+      }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error("save failed");
+
+    const blob = recordedBlob || uploadedFile;
+    if (blob) {
+      const fd  = new FormData();
+      const ext = uploadedFile ? (uploadedFile.name.split(".").pop() || "webm") : blobExt(blob);
+      fd.append("audio", blob, `hum.${ext}`);
+      await fetch(`/api/songs/${songId}/sections/${sectionId}/audio`, { method: "POST", body: fd });
+    }
+
+    await loadSong(songId);
+    setActiveSection(sectionId, false);
+    wsToast(`✓ Saved to ${currentSectionLabel(sectionId)}`);
+  } catch (e) {
+    wsToast("Save failed — try again");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save to Song"; }
+  }
+}
+
+/* ── Create song ── */
+async function createSong(title) {
+  const res = await fetch("/api/songs", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title,
+      bpm: metroBpm,
+      genre: state.genre,
+      key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
+    }),
+  });
+  const data = await res.json();
+  if (!data.success) return;
+  workspace.currentSong = null;
+  workspace.activeSectionId = null;
+  await loadSongs();
+  await loadSong(data.song.id);
+  wsToast(`✓ Created “${data.song.title}”`);
+}
+
+/* ── Full-song view ── */
+async function viewFullSong() {
+  if (!workspace.currentSong) return;
+  const res  = await fetch(`/api/songs/${workspace.currentSong.id}/export`);
+  const data = await res.json();
+  if (!data.success) return;
+
+  document.getElementById("viewSongTitle").textContent = workspace.currentSong.title;
+  const body = document.getElementById("fullSongBody");
+  const sections = workspace.currentSong.sections || [];
+  if (!sections.length) {
+    body.innerHTML = `<div class="full-song-empty">No sections yet. Add a section and hum into it.</div>`;
+  } else {
+    body.innerHTML = sections.map((s) => `
+      <div class="fs-section">
+        <div class="fs-label">${escapeHtml(s.label)}</div>
+        <pre class="fs-lyrics">${escapeHtml((s.lyrics || "").trim() || "(empty — hum this part)")}</pre>
+      </div>`).join("");
+  }
+  body.dataset.fulltext = data.text;
+  document.getElementById("viewSongModal").classList.remove("hidden");
+}
+
+async function deleteCurrentSong() {
+  if (!workspace.currentSong) return;
+  if (!confirm(`Delete “${workspace.currentSong.title}” and all its sections?`)) return;
+  await fetch(`/api/songs/${workspace.currentSong.id}`, { method: "DELETE" });
+  document.getElementById("viewSongModal").classList.add("hidden");
+  workspace.currentSong = null;
+  workspace.activeSectionId = null;
+  currentSongTitleEl.textContent = "No song selected";
+  document.getElementById("workspaceArrangement").classList.add("hidden");
+  document.getElementById("viewSongBtn").classList.add("hidden");
+  await loadSongs();
+  wsToast("Song deleted");
+}
+
+/* ── Modals ── */
+function openNewSongModal() {
+  const input = document.getElementById("newSongTitle");
+  input.value = "";
+  document.getElementById("newSongModal").classList.remove("hidden");
+  setTimeout(() => input.focus(), 50);
+}
+function closeNewSongModal() {
+  document.getElementById("newSongModal").classList.add("hidden");
+}
+function openAddSectionModal() {
+  if (!workspace.currentSong) { openNewSongModal(); return; }
+  document.getElementById("addSectionModal").classList.remove("hidden");
+}
+function closeAddSectionModal() {
+  document.getElementById("addSectionModal").classList.add("hidden");
+}
+
+/* ── Workspace event wiring ── */
+document.getElementById("songSelectBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  songDropdownEl.classList.toggle("hidden");
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".workspace-song-picker")) songDropdownEl.classList.add("hidden");
+});
+songDropdownEl.addEventListener("click", (e) => {
+  const item = e.target.closest(".song-dropdown-item");
+  if (!item) return;
+  songDropdownEl.classList.add("hidden");
+  loadSong(item.dataset.id);
+});
+
+document.getElementById("newSongBtn").addEventListener("click", openNewSongModal);
+document.getElementById("newSongCancel").addEventListener("click", closeNewSongModal);
+document.getElementById("newSongCreate").addEventListener("click", () => {
+  const title = document.getElementById("newSongTitle").value.trim();
+  if (!title) return;
+  closeNewSongModal();
+  createSong(title);
+});
+document.getElementById("newSongTitle").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("newSongCreate").click();
+});
+
+document.getElementById("addSectionCancel").addEventListener("click", closeAddSectionModal);
+document.querySelectorAll(".section-type-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    closeAddSectionModal();
+    addSection(btn.dataset.type);
+  });
+});
+
+document.getElementById("viewSongBtn").addEventListener("click", viewFullSong);
+document.getElementById("viewSongClose").addEventListener("click", () =>
+  document.getElementById("viewSongModal").classList.add("hidden"));
+document.getElementById("deleteSongBtn").addEventListener("click", deleteCurrentSong);
+document.getElementById("copyFullSong").addEventListener("click", function () {
+  const text = document.getElementById("fullSongBody").dataset.fulltext || "";
+  navigator.clipboard.writeText(text).then(() => {
+    this.textContent = "✓ Copied!";
+    setTimeout(() => { this.textContent = "Copy Full Song"; }, 2000);
+  });
+});
+
+// Close modals on overlay click
+document.querySelectorAll(".modal-overlay").forEach((overlay) => {
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.classList.add("hidden");
+  });
+});
+
+// Boot the workspace
+loadSongs();

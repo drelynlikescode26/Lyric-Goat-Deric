@@ -1522,3 +1522,346 @@ body {
   color: #fff;
   box-shadow: 0 0 12px var(--accent-glow);
 }
+
+/* ══════════════════════════════════════
+   SONG WORKSPACE
+   ══════════════════════════════════════ */
+.workspace-bar {
+  background: linear-gradient(135deg, rgba(124,58,237,0.10), rgba(6,182,212,0.06));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workspace-song-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.workspace-song-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workspace-icon { font-size: 1.2rem; }
+
+.song-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 9px 14px;
+  cursor: pointer;
+  max-width: 320px;
+  transition: border-color 0.15s ease;
+}
+.song-select-btn:hover { border-color: var(--accent); }
+.song-select-btn #currentSongTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.song-select-arrow { color: var(--text-muted); font-size: 0.7rem; }
+
+.song-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 30px;
+  z-index: 50;
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  padding: 6px;
+}
+.song-dropdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 11px;
+  cursor: pointer;
+  color: var(--text);
+}
+.song-dropdown-item:hover { background: var(--surface2); }
+.song-dropdown-item.active { background: var(--accent-glow); }
+.song-dd-title { font-weight: 600; font-size: 0.92rem; }
+.song-dd-meta  { font-size: 0.72rem; color: var(--text-muted); }
+.song-dropdown-empty {
+  padding: 14px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.workspace-song-actions { display: flex; gap: 8px; }
+
+.ws-btn {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.ws-btn:hover { box-shadow: 0 0 14px var(--accent-glow); }
+.ws-btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.ws-btn-ghost:hover { color: var(--text); border-color: var(--accent); box-shadow: none; }
+
+/* ── Arrangement ── */
+.workspace-arrangement {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.arrangement-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.arrangement-hint {
+  margin-left: 8px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: var(--accent2);
+  text-transform: none;
+}
+.arrangement-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.section-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 7px 13px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+.section-chip:hover { border-color: var(--accent); color: var(--text); }
+.section-chip.filled { color: var(--text); }
+.section-chip.filled .section-chip-check { color: var(--green); font-size: 0.72rem; }
+.section-chip-empty { color: var(--text-muted); font-size: 0.7rem; opacity: 0.6; }
+.section-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: #fff;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.section-chip-del {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  margin-left: 2px;
+}
+.section-chip:hover .section-chip-del { opacity: 0.7; }
+.section-chip-del:hover { color: var(--red); opacity: 1; }
+
+.section-add-btn {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 20px;
+  padding: 7px 13px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.section-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Save-to-song button on version cards ── */
+.save-section-btn {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.save-section-btn:hover { background: var(--accent); color: #fff; }
+.save-section-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Modals ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+}
+.modal-large { max-width: 600px; }
+.modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+.modal-sub { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px; }
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.modal-close:hover { color: var(--text); }
+.modal-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 1rem;
+  margin-bottom: 18px;
+}
+.modal-input:focus { outline: none; border-color: var(--accent); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.section-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.section-type-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 8px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.section-type-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* ── Full song view ── */
+.full-song-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.fs-section {
+  border-left: 2px solid var(--accent);
+  padding-left: 14px;
+}
+.fs-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent2);
+  margin-bottom: 6px;
+}
+.fs-lyrics {
+  font-family: inherit;
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text);
+  margin: 0;
+}
+.full-song-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 30px;
+}
+
+/* ── Toast ── */
+.ws-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  background: var(--surface2);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 12px 20px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  animation: toastIn 0.2s ease;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (max-width: 520px) {
+  .section-type-grid { grid-template-columns: repeat(2, 1fr); }
+  .song-select-btn { max-width: 180px; }
+}
