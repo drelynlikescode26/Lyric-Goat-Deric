@@ -2,6 +2,7 @@ import os
 import time
 import tempfile
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from services.transcribe import transcribe_audio
-from services.analyze import analyze_flow, syllable_rhythm_string
+from services.analyze import analyze_flow, preanalyze_audio, syllable_rhythm_string
 from services.generate import generate_lyrics, generate_single_line
 from services.preprocess import preprocess
 
@@ -53,11 +54,18 @@ def process():
 
         clean_path = preprocess(audio_path)
 
-        transcription = transcribe_audio(clean_path)
-        rough_text = transcription["text"]
+        # Run transcription and audio analysis in parallel — they don't
+        # depend on each other, so no reason to run them sequentially.
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            t_future = ex.submit(transcribe_audio, clean_path)
+            a_future = ex.submit(preanalyze_audio, clean_path)
+
+        transcription   = t_future.result()
+        pre_data        = a_future.result()
+        rough_text      = transcription["text"]
         word_timestamps = transcription.get("words", [])
 
-        flow_data = analyze_flow(clean_path, word_timestamps)
+        flow_data = analyze_flow(clean_path, word_timestamps, pre_data=pre_data)
         flow_data["rhythm_string"] = syllable_rhythm_string(flow_data.get("flow_map", []))
 
         versions = generate_lyrics(

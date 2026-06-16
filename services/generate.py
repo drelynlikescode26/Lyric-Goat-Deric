@@ -2,6 +2,7 @@ import re
 import os
 import json
 import anthropic
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -597,26 +598,32 @@ def generate_lyrics(
     phrase_map       = flow_data.get("phrase_map", [])
     phonetic_anchors = _extract_phonetic_anchors(phrase_map)
 
-    results = []
-    for variant in STYLE_VARIANTS:
+    system_prompt = _build_system_prompt()
+
+    def _generate_one(variant: dict) -> dict:
         prompt = _build_user_prompt(
             rough_text, flow_data, tone, mode, vibe, gen_mode, key, variant, phonetic_anchors
         )
         msg = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
-            system=_build_system_prompt(),
+            system=system_prompt,
             messages=[{"role": "user", "content": prompt}],
         )
         lyrics = msg.content[0].text.strip()
         score, breakdown = _score_lyrics(lyrics, flow_data)
-        results.append({
-            "name":           variant["name"],
-            "label":          variant["label"],
-            "lyrics":         lyrics,
-            "score":          score,
+        return {
+            "name":            variant["name"],
+            "label":           variant["label"],
+            "lyrics":          lyrics,
+            "score":           score,
             "score_breakdown": breakdown,
-        })
+        }
+
+    # Generate all 3 style variants in parallel — no data dependency between them.
+    with ThreadPoolExecutor(max_workers=len(STYLE_VARIANTS)) as ex:
+        futures = {ex.submit(_generate_one, v): v for v in STYLE_VARIANTS}
+        results = [f.result() for f in as_completed(futures)]
 
     # Pass 1: Haiku syllable verification
     results = _verify_and_fix(results, phrase_map)

@@ -27,19 +27,25 @@ VOWEL_FAMILIES = {
 }
 
 
-def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
+def preanalyze_audio(audio_path: str) -> dict:
+    """
+    Pure-audio analysis that does NOT need word timestamps.
+    Run this in parallel with transcription to save wall-clock time.
+    Returns a dict that analyze_flow() accepts as `pre_data`.
+    """
     y, sr = librosa.load(audio_path, sr=None)
 
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-    tempo = float(np.squeeze(tempo))
+    tempo      = float(np.squeeze(tempo))
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
-    onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="frames",
-                                               pre_max=3, post_max=3,
-                                               pre_avg=3, post_avg=5, delta=0.07, wait=10)
+    onset_frames = librosa.onset.onset_detect(
+        y=y, sr=sr, units="frames",
+        pre_max=3, post_max=3, pre_avg=3, post_avg=5, delta=0.07, wait=10
+    )
     onset_times = librosa.frames_to_time(onset_frames, sr=sr)
 
-    rms = librosa.feature.rms(y=y)[0]
+    rms        = librosa.feature.rms(y=y)[0]
     avg_energy = float(np.mean(rms))
     max_energy = float(np.max(rms))
     energy_ratio = avg_energy / max_energy if max_energy > 0 else 0
@@ -47,8 +53,48 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
     avg_centroid = float(np.mean(spectral_centroid))
 
-    # Musical key via Krumhansl-Kessler profiles (more accurate than argmax alone)
     detected_key = _detect_key_kk(y, sr)
+    duration     = round(float(len(y) / sr), 2)
+
+    return {
+        "y":            y,
+        "sr":           sr,
+        "tempo":        tempo,
+        "beat_times":   beat_times,
+        "onset_times":  onset_times,
+        "energy_ratio": energy_ratio,
+        "avg_centroid": avg_centroid,
+        "detected_key": detected_key,
+        "duration":     duration,
+    }
+
+
+def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None = None) -> dict:
+    """
+    Full flow analysis.  Pass `pre_data` from preanalyze_audio() to skip
+    re-loading audio and re-running librosa (saves ~1-2s when parallelized).
+    """
+    if pre_data is not None:
+        y            = pre_data["y"]
+        sr           = pre_data["sr"]
+        tempo        = pre_data["tempo"]
+        beat_times   = pre_data["beat_times"]
+        onset_times  = pre_data["onset_times"]
+        energy_ratio = pre_data["energy_ratio"]
+        avg_centroid = pre_data["avg_centroid"]
+        detected_key = pre_data["detected_key"]
+        duration     = pre_data["duration"]
+    else:
+        pre_data     = preanalyze_audio(audio_path)
+        y            = pre_data["y"]
+        sr           = pre_data["sr"]
+        tempo        = pre_data["tempo"]
+        beat_times   = pre_data["beat_times"]
+        onset_times  = pre_data["onset_times"]
+        energy_ratio = pre_data["energy_ratio"]
+        avg_centroid = pre_data["avg_centroid"]
+        detected_key = pre_data["detected_key"]
+        duration     = pre_data["duration"]
 
     # Vowel patterns + repetition detection
     all_words = [w["word"] for w in word_timestamps]
@@ -68,8 +114,6 @@ def analyze_flow(audio_path: str, word_timestamps: list) -> dict:
     transcript_too_sparse = (
         onset_expected > 5 and total_transcript_syls < onset_expected * 0.30
     )
-
-    duration = round(float(len(y) / sr), 2)
 
     if phrases and enough_words and not transcript_too_sparse:
         phrase_map = _build_phrase_map(phrases, beat_times)
