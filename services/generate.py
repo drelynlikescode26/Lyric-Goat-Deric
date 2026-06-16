@@ -57,6 +57,41 @@ STYLE_VARIANTS = [
     {"name": "punchy",  "label": "Punchy Version",  "description": "short, hard-hitting lines — maximum impact, minimum words"},
 ]
 
+GENRE_RULES = {
+    "hiphop": (
+        "Genre: Classic hip-hop. Think in 4-bar / 8-bar units. Internal rhyme schemes (AABB, ABAB, multi). "
+        "Punchlines land at bar ends. Wordplay and double meanings. Natural spoken cadence."
+    ),
+    "trap": (
+        "Genre: Trap. Triplet cadence is king — 'baby baby baby', 'riding riding riding'. "
+        "Short melodic hooks. Dark aspirational imagery. Melodic lines sit under the beat. "
+        "Mix melodic sung bars with punchy staccato bars."
+    ),
+    "rnb": (
+        "Genre: R&B. Smooth melodic phrasing. Held vowels on stressed syllables. "
+        "Emotional storytelling — vulnerability over bravado. Runs and ad-libs at phrase ends. "
+        "Lines breathe — don't overstuff. Think Bryson Tiller, SZA, Frank Ocean cadence."
+    ),
+    "pop": (
+        "Genre: Pop. Anthemic and universal. Simple words, massive emotional impact. "
+        "Hooks repeat cleanly. Last word of each line should be singable. "
+        "Short punchy verses, big catchy choruses."
+    ),
+    "drill": (
+        "Genre: Drill. Dark heavy sliding cadence. Monotone delivery with rhythmic punch at line ends. "
+        "Street imagery, grounded and specific. Lines hit hard on the back half."
+    ),
+    "afrobeats": (
+        "Genre: Afrobeats. Rhythmic melodic flow, celebratory even when emotional. "
+        "Call-and-response patterns. Repetition is a feature. "
+        "Lines feel like they're dancing — natural rise and fall. Wizkid, Burna Boy energy."
+    ),
+    "latin": (
+        "Genre: Latin/Reggaeton. Dembow rhythm influence. Melodic hooks over rhythmic verses. "
+        "Lines hit on the 2 and 4 hard. Bad Bunny, J Balvin style."
+    ),
+}
+
 # Vowel hint → word suggestions
 _VOWEL_HINT_WORDS = {
     "bright": ["way", "free", "high", "feel", "right", "stay", "real", "sky"],
@@ -99,10 +134,12 @@ def _extract_phonetic_anchors(phrase_map: list) -> list:
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-def _build_system_prompt() -> str:
-    return """\
+def _build_system_prompt(genre: str = "") -> str:
+    genre_rule = GENRE_RULES.get(genre, "")
+    genre_block = f"\n\n{genre_rule}" if genre_rule else ""
+    return f"""\
 You are a world-class songwriter and ghostwriter. Grammy-winning credits across \
-hip-hop, R&B, trap, and pop. You don't write filler. Every bar has intent.
+hip-hop, R&B, trap, and pop. You don't write filler. Every bar has intent.{genre_block}
 
 YOUR CRAFT:
 - Emotion first, words second
@@ -222,6 +259,7 @@ def _build_user_prompt(
     key: str,
     variant: dict,
     phonetic_anchors: list,
+    genre: str = "",
 ) -> str:
     tone_desc  = STYLE_DESCRIPTIONS["tone"].get(tone, tone)
     mode_desc  = STYLE_DESCRIPTIONS["mode"].get(mode, mode)
@@ -263,6 +301,7 @@ def _build_user_prompt(
         approach = "CREATIVE MODE — use vibe and emotion as your guide. Words are inspiration, not instruction."
         source_block = f'\nMUMBLE REFERENCE: "{rough_text}"\n'
 
+    genre_str = f" · {genre}" if genre else ""
     return f"""Transform this vocal recording into real lyrics.
 
 APPROACH: {approach}{source_block}
@@ -271,7 +310,7 @@ TEMPO: {tempo_str} BPM  |  FLOW: {flow_style}{key_str}{vowel_hint_str}
 BAR-BY-BAR CONSTRAINTS:
 {phrase_blocks}
 
-STYLE: {tone} · {mode} · {vibe}
+STYLE: {tone} · {mode} · {vibe}{genre_str}
 - Tone: {tone_desc}
 - Mode: {mode_desc}
 - Vibe: {vibe_desc}
@@ -295,6 +334,7 @@ def generate_single_line(
     vibe: str,
     gen_mode: str,
     key: str,
+    genre: str = "",
 ) -> str:
     vibe_desc    = STYLE_DESCRIPTIONS["vibe"].get(vibe, vibe)
     vowel_family = flow_data.get("vowel_family")
@@ -349,7 +389,7 @@ RULES:
     msg = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=200,
-        system=_build_system_prompt(),
+        system=_build_system_prompt(genre),
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip().strip('"')
@@ -594,15 +634,16 @@ def generate_lyrics(
     vibe: str = "introspective",
     gen_mode: str = "cadence",
     key: str = "auto",
+    genre: str = "",
 ) -> list[dict]:
     phrase_map       = flow_data.get("phrase_map", [])
     phonetic_anchors = _extract_phonetic_anchors(phrase_map)
 
-    system_prompt = _build_system_prompt()
+    system_prompt = _build_system_prompt(genre)
 
     def _generate_one(variant: dict) -> dict:
         prompt = _build_user_prompt(
-            rough_text, flow_data, tone, mode, vibe, gen_mode, key, variant, phonetic_anchors
+            rough_text, flow_data, tone, mode, vibe, gen_mode, key, variant, phonetic_anchors, genre=genre
         )
         msg = client.messages.create(
             model="claude-sonnet-4-6",

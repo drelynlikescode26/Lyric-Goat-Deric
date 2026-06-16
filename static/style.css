@@ -1470,3 +1470,55 @@ body {
   .btn-record { min-width: 160px; padding: 16px 24px; }
   .pill { padding: 7px 12px; font-size: 0.8rem; }
 }
+
+/* ── Hum Mode Toggle ── */
+.hum-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.hum-mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hum-mode-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text);
+}
+
+.hum-mode-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.hum-mode-toggle {
+  min-width: 56px;
+  height: 32px;
+  border-radius: 16px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0 12px;
+}
+
+.hum-mode-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px var(--accent-glow);
+}

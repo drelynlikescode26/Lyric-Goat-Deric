@@ -24,6 +24,8 @@ const state = {
   gen_mode: "cadence",
   key: "auto",
   keyQuality: "major",
+  genre: "hiphop",
+  humMode: true,
 };
 
 /* ── DOM refs ── */
@@ -297,6 +299,16 @@ document.querySelectorAll(".key-quality-btn").forEach((btn) => {
 
 function checkReady() { generateBtn.disabled = !(recordedBlob || uploadedFile); }
 
+/* ══════════════════
+   HUM MODE TOGGLE
+   ══════════════════ */
+const humModeToggle = document.getElementById("humModeToggle");
+humModeToggle.addEventListener("click", () => {
+  state.humMode = !state.humMode;
+  humModeToggle.classList.toggle("active", state.humMode);
+  humModeToggle.querySelector(".hum-mode-status").textContent = state.humMode ? "ON" : "OFF";
+});
+
 /* ══════════════════════════════════════
    RESET + REGENERATE ALL
    ══════════════════════════════════════ */
@@ -359,6 +371,9 @@ generateBtn.addEventListener("click", async () => {
   formData.append("gen_mode", state.gen_mode);
   const keyValue = state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto";
   formData.append("key", keyValue);
+  formData.append("genre",      state.genre);
+  formData.append("hum_mode",   state.humMode.toString());
+  formData.append("manual_bpm", metroBpm.toString());
 
   try {
     const res = await fetch("/process", { method: "POST", body: formData });

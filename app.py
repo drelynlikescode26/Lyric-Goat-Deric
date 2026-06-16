@@ -51,26 +51,33 @@ def process():
         vibe     = request.form.get("vibe", "introspective")
         gen_mode = request.form.get("gen_mode", "cadence")
         key      = request.form.get("key", "auto")
+        genre      = request.form.get("genre", "hiphop")
+        manual_bpm = float(request.form.get("manual_bpm", "0") or "0")
+        hum_mode   = request.form.get("hum_mode", "false").lower() == "true"
 
         clean_path = preprocess(audio_path)
 
-        # Run transcription and audio analysis in parallel — they don't
-        # depend on each other, so no reason to run them sequentially.
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            t_future = ex.submit(transcribe_audio, clean_path)
-            a_future = ex.submit(preanalyze_audio, clean_path)
+        if hum_mode:
+            # Skip transcription entirely — pure audio analysis only.
+            # Saves ~3-5s and avoids confusing the model with non-speech audio.
+            pre_data        = preanalyze_audio(clean_path, manual_bpm=manual_bpm)
+            rough_text      = ""
+            word_timestamps = []
+        else:
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                t_future = ex.submit(transcribe_audio, clean_path)
+                a_future = ex.submit(preanalyze_audio, clean_path, manual_bpm)
+            transcription   = t_future.result()
+            pre_data        = a_future.result()
+            rough_text      = transcription["text"]
+            word_timestamps = transcription.get("words", [])
 
-        transcription   = t_future.result()
-        pre_data        = a_future.result()
-        rough_text      = transcription["text"]
-        word_timestamps = transcription.get("words", [])
-
-        flow_data = analyze_flow(clean_path, word_timestamps, pre_data=pre_data)
+        flow_data = analyze_flow(clean_path, word_timestamps, pre_data=pre_data, hum_mode=hum_mode)
         flow_data["rhythm_string"] = syllable_rhythm_string(flow_data.get("flow_map", []))
 
         versions = generate_lyrics(
             rough_text, flow_data,
-            tone=tone, mode=mode, vibe=vibe, gen_mode=gen_mode, key=key
+            tone=tone, mode=mode, vibe=vibe, gen_mode=gen_mode, key=key, genre=genre
         )
 
         return jsonify({

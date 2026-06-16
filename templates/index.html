@@ -182,7 +182,31 @@
     <section class="card controls-section">
       <h2 class="section-title">2. Set Your Style</h2>
 
+      <!-- Hum Mode Toggle -->
+      <div class="hum-mode-row">
+        <div class="hum-mode-info">
+          <span class="hum-mode-title">HUM MODE</span>
+          <span class="hum-mode-desc">Pure melody analysis — no speech recognition, just cadence &amp; rhythm</span>
+        </div>
+        <button class="hum-mode-toggle active" id="humModeToggle" type="button">
+          <span class="hum-mode-status">ON</span>
+        </button>
+      </div>
+
       <div class="controls-grid">
+
+        <div class="control-group">
+          <label class="control-label">GENRE</label>
+          <div class="pill-group" data-group="genre">
+            <button class="pill active" data-value="hiphop">Hip-Hop</button>
+            <button class="pill" data-value="trap">Trap</button>
+            <button class="pill" data-value="rnb">R&amp;B</button>
+            <button class="pill" data-value="pop">Pop</button>
+            <button class="pill" data-value="drill">Drill</button>
+            <button class="pill" data-value="afrobeats">Afrobeats</button>
+            <button class="pill" data-value="latin">Latin</button>
+          </div>
+        </div>
 
         <div class="control-group">
           <label class="control-label">APPROACH <span class="control-hint">how the AI reads your mumble</span></label>

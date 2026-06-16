@@ -27,7 +27,7 @@ VOWEL_FAMILIES = {
 }
 
 
-def preanalyze_audio(audio_path: str) -> dict:
+def preanalyze_audio(audio_path: str, manual_bpm: float = 0) -> dict:
     """
     Pure-audio analysis that does NOT need word timestamps.
     Run this in parallel with transcription to save wall-clock time.
@@ -35,9 +35,15 @@ def preanalyze_audio(audio_path: str) -> dict:
     """
     y, sr = librosa.load(audio_path, sr=None)
 
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-    tempo      = float(np.squeeze(tempo))
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+    if manual_bpm > 0:
+        tempo = float(manual_bpm)
+        beat_interval = 60.0 / tempo
+        duration_pre = float(len(y) / sr)
+        beat_times = np.arange(0, duration_pre, beat_interval)
+    else:
+        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+        tempo      = float(np.squeeze(tempo))
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
     onset_frames = librosa.onset.onset_detect(
         y=y, sr=sr, units="frames",
@@ -69,7 +75,7 @@ def preanalyze_audio(audio_path: str) -> dict:
     }
 
 
-def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None = None) -> dict:
+def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None = None, hum_mode: bool = False) -> dict:
     """
     Full flow analysis.  Pass `pre_data` from preanalyze_audio() to skip
     re-loading audio and re-running librosa (saves ~1-2s when parallelized).
@@ -115,12 +121,11 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
         onset_expected > 5 and total_transcript_syls < onset_expected * 0.30
     )
 
-    if phrases and enough_words and not transcript_too_sparse:
+    if not hum_mode and phrases and enough_words and not transcript_too_sparse:
         phrase_map = _build_phrase_map(phrases, beat_times)
         melody_mode = vowel_data["is_repetitive"]
     else:
-        # Transcript is unusable (pure mumble, melody, 1 word, etc.)
-        # Build phrase map entirely from audio analysis.
+        # Pure audio path: hum mode OR transcript unusable
         phrase_map = _build_melody_phrase_map(y, sr, onset_times, beat_times, duration)
         melody_mode = True
 
