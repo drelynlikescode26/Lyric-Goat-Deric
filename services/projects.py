@@ -1,268 +1,246 @@
 """
-Song Workspace persistence.
+Song Workspace persistence — Supabase backend.
 
-Each song is stored as a single JSON file in data/songs/<id>.json.
-A song holds ordered sections (verse, hook, bridge, etc.), and each section
-keeps its generated lyrics, the analysis it came from, and an optional copy
-of the hum audio so it can be replayed while building the arrangement.
+Songs and their sections live in Postgres (tables: songs, sections); hum audio
+lives in the `section-audio` storage bucket. This replaces the old JSON-on-disk
+store so data persists across deploys and stays in sync between phone and
+desktop.
 
-No database — plain JSON on disk. Simple, portable, easy to back up, and
-works the same whether running locally or deployed.
+Configuration (env):
+  SUPABASE_URL   e.g. https://xxxx.supabase.co
+  SUPABASE_KEY   publishable / anon key
+
+The public function API is unchanged from the JSON version, so app.py needs
+no changes beyond how section audio is served (now a redirect to the bucket).
 """
 import os
-import json
-import time
-import uuid
-import shutil
-import tempfile
-from pathlib import Path
+from collections import Counter
+from datetime import datetime, timezone
 
-DATA_DIR  = Path("data")
-SONGS_DIR = DATA_DIR / "songs"
-AUDIO_DIR = DATA_DIR / "audio"
+from supabase import create_client, Client
 
-SONGS_DIR.mkdir(parents=True, exist_ok=True)
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+BUCKET = "section-audio"
 
-# Section types offered in the arrangement, in typical song order.
-SECTION_TYPES = ["intro", "verse", "pre-chorus", "hook", "bridge", "outro"]
+_client: Client | None = None
+
+_MIME = {
+    "webm": "audio/webm", "mp4": "audio/mp4", "m4a": "audio/mp4",
+    "ogg": "audio/ogg", "mp3": "audio/mpeg", "wav": "audio/wav",
+}
 
 
-def _now() -> float:
-    return round(time.time(), 3)
+def get_client() -> Client:
+    global _client
+    if _client is None:
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        if not url or not key:
+            raise RuntimeError(
+                "Supabase not configured — set SUPABASE_URL and SUPABASE_KEY "
+                "in your environment (.env)."
+            )
+        _client = create_client(url, key)
+    return _client
 
 
-def _new_id() -> str:
-    return uuid.uuid4().hex[:12]
+# ── Serializers (DB row → API shape) ─────────────────────────────────────────
+
+def _section_out(row: dict) -> dict:
+    return {
+        "id":         row["id"],
+        "type":       row["type"],
+        "label":      row["label"],
+        "lyrics":     row["lyrics"],
+        "rough_text": row["rough_text"],
+        "phrase_map": row["phrase_map"],
+        "versions":   row["versions"],
+        "settings":   row["settings"],
+        "audio_file": row["audio_file"],
+        "order":      row["order_index"],
+        "updated_at": row["updated_at"],
+    }
 
 
-def _song_path(song_id: str) -> Path:
-    return SONGS_DIR / f"{song_id}.json"
-
-
-def _atomic_write(path: Path, data: dict) -> None:
-    """Write JSON via a temp file + rename so a crash can't corrupt the song."""
-    tmp = tempfile.NamedTemporaryFile(
-        "w", dir=path.parent, delete=False, suffix=".tmp", encoding="utf-8"
-    )
-    try:
-        json.dump(data, tmp, ensure_ascii=False, indent=2)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp.close()
-        os.replace(tmp.name, path)
-    except Exception:
-        tmp.close()
-        if os.path.exists(tmp.name):
-            os.unlink(tmp.name)
-        raise
-
-
-def _load(song_id: str) -> dict | None:
-    path = _song_path(song_id)
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+def _song_out(row: dict, sections: list[dict]) -> dict:
+    return {
+        "id":         row["id"],
+        "title":      row["title"],
+        "bpm":        row["bpm"],
+        "key":        row["key"],
+        "genre":      row["genre"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "sections":   sections,
+    }
 
 
 # ── Songs ─────────────────────────────────────────────────────────────────────
 
 def list_songs() -> list[dict]:
-    """Lightweight list for the song picker — no section payloads."""
-    songs = []
-    for path in SONGS_DIR.glob("*.json"):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                s = json.load(f)
-        except Exception:
-            continue
-        songs.append({
-            "id":            s.get("id"),
-            "title":         s.get("title", "Untitled"),
-            "bpm":           s.get("bpm", 90),
-            "key":           s.get("key", "auto"),
-            "genre":         s.get("genre", "hiphop"),
-            "section_count": len(s.get("sections", [])),
-            "created_at":    s.get("created_at", 0),
-            "updated_at":    s.get("updated_at", 0),
-        })
-    songs.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
-    return songs
+    c = get_client()
+    songs = c.table("songs").select("*").order("updated_at", desc=True).execute().data or []
+    sec_rows = c.table("sections").select("song_id").execute().data or []
+    counts = Counter(r["song_id"] for r in sec_rows)
+    return [{
+        "id":            s["id"],
+        "title":         s["title"],
+        "bpm":           s["bpm"],
+        "key":           s["key"],
+        "genre":         s["genre"],
+        "section_count": counts.get(s["id"], 0),
+        "created_at":    s["created_at"],
+        "updated_at":    s["updated_at"],
+    } for s in songs]
 
 
 def create_song(title: str, bpm: int = 90, key: str = "auto", genre: str = "hiphop") -> dict:
-    song = {
-        "id":         _new_id(),
-        "title":      (title or "Untitled").strip()[:120],
-        "bpm":        int(bpm) if bpm else 90,
-        "key":        key or "auto",
-        "genre":      genre or "hiphop",
-        "sections":   [],
-        "created_at": _now(),
-        "updated_at": _now(),
-    }
-    _atomic_write(_song_path(song["id"]), song)
-    return song
+    c = get_client()
+    row = c.table("songs").insert({
+        "title": (title or "Untitled").strip()[:120],
+        "bpm":   int(bpm) if bpm else 90,
+        "key":   key or "auto",
+        "genre": genre or "hiphop",
+    }).execute().data[0]
+    return _song_out(row, [])
 
 
 def get_song(song_id: str) -> dict | None:
-    return _load(song_id)
+    c = get_client()
+    songs = c.table("songs").select("*").eq("id", song_id).limit(1).execute().data
+    if not songs:
+        return None
+    sections = c.table("sections").select("*").eq("song_id", song_id)\
+        .order("order_index").execute().data or []
+    return _song_out(songs[0], [_section_out(s) for s in sections])
 
 
 def update_song(song_id: str, **fields) -> dict | None:
-    song = _load(song_id)
-    if song is None:
-        return None
-    for k in ("title", "bpm", "key", "genre"):
-        if k in fields and fields[k] is not None:
-            song[k] = fields[k]
-    song["updated_at"] = _now()
-    _atomic_write(_song_path(song_id), song)
-    return song
+    c = get_client()
+    payload = {k: fields[k] for k in ("title", "bpm", "key", "genre")
+               if k in fields and fields[k] is not None}
+    if payload:
+        c.table("songs").update(payload).eq("id", song_id).execute()
+    return get_song(song_id)
 
 
 def delete_song(song_id: str) -> bool:
-    song = _load(song_id)
-    if song is None:
-        return False
-    # Clean up any section audio belonging to this song
-    for section in song.get("sections", []):
-        _delete_section_audio(section)
-    path = _song_path(song_id)
-    if path.exists():
-        path.unlink()
+    c = get_client()
+    # Remove any stored audio for this song's sections first
+    sections = c.table("sections").select("audio_file").eq("song_id", song_id).execute().data or []
+    paths = [s["audio_file"] for s in sections if s.get("audio_file")]
+    if paths:
+        try:
+            c.storage.from_(BUCKET).remove(paths)
+        except Exception:
+            pass
+    c.table("songs").delete().eq("id", song_id).execute()  # cascades to sections
     return True
 
 
 # ── Sections ────────────────────────────────────────────────────────────────
 
-def _section_defaults() -> dict:
-    return {
-        "id":         _new_id(),
-        "type":       "verse",
-        "label":      "Verse",
-        "lyrics":     "",
-        "rough_text": "",
-        "phrase_map": [],
-        "versions":   [],
-        "settings":   {},
-        "audio_file": None,
-        "order":      0,
-        "updated_at": _now(),
-    }
+_SECTION_FIELDS = ("type", "label", "lyrics", "rough_text",
+                   "phrase_map", "versions", "settings", "audio_file")
 
 
 def add_section(song_id: str, section_data: dict) -> dict | None:
-    song = _load(song_id)
-    if song is None:
+    c = get_client()
+    if not c.table("songs").select("id").eq("id", song_id).limit(1).execute().data:
         return None
-    section = _section_defaults()
-    for k in ("type", "label", "lyrics", "rough_text", "phrase_map",
-              "versions", "settings", "audio_file"):
+    existing = c.table("sections").select("id").eq("song_id", song_id).execute().data or []
+    payload = {"song_id": song_id, "order_index": len(existing)}
+    for k in _SECTION_FIELDS:
         if k in section_data and section_data[k] is not None:
-            section[k] = section_data[k]
-    section["order"] = len(song["sections"])
-    section["updated_at"] = _now()
-    song["sections"].append(section)
-    song["updated_at"] = _now()
-    _atomic_write(_song_path(song_id), song)
-    return section
+            payload[k] = section_data[k]
+    row = c.table("sections").insert(payload).execute().data[0]
+    return _section_out(row)
 
 
 def update_section(song_id: str, section_id: str, section_data: dict) -> dict | None:
-    song = _load(song_id)
-    if song is None:
-        return None
-    for section in song["sections"]:
-        if section["id"] == section_id:
-            for k in ("type", "label", "lyrics", "rough_text", "phrase_map",
-                      "versions", "settings", "audio_file", "order"):
-                if k in section_data and section_data[k] is not None:
-                    section[k] = section_data[k]
-            section["updated_at"] = _now()
-            song["updated_at"] = _now()
-            _atomic_write(_song_path(song_id), song)
-            return section
-    return None
+    c = get_client()
+    payload = {}
+    for k in _SECTION_FIELDS:
+        if k in section_data and section_data[k] is not None:
+            payload[k] = section_data[k]
+    if "order" in section_data and section_data["order"] is not None:
+        payload["order_index"] = section_data["order"]
+    if payload:
+        c.table("sections").update(payload)\
+            .eq("id", section_id).eq("song_id", song_id).execute()
+        # keep parent song's updated_at fresh so it sorts to the top
+        c.table("songs").update({"updated_at": datetime.now(timezone.utc).isoformat()})\
+            .eq("id", song_id).execute()
+    rows = c.table("sections").select("*").eq("id", section_id).limit(1).execute().data
+    return _section_out(rows[0]) if rows else None
 
 
 def delete_section(song_id: str, section_id: str) -> bool:
-    song = _load(song_id)
-    if song is None:
-        return False
-    before = len(song["sections"])
-    kept = []
-    for section in song["sections"]:
-        if section["id"] == section_id:
-            _delete_section_audio(section)
-        else:
-            kept.append(section)
-    song["sections"] = kept
+    c = get_client()
+    rows = c.table("sections").select("audio_file").eq("id", section_id).execute().data or []
+    for r in rows:
+        if r.get("audio_file"):
+            try:
+                c.storage.from_(BUCKET).remove([r["audio_file"]])
+            except Exception:
+                pass
+    c.table("sections").delete().eq("id", section_id).eq("song_id", song_id).execute()
     # Re-pack order indices
-    for i, s in enumerate(song["sections"]):
-        s["order"] = i
-    song["updated_at"] = _now()
-    _atomic_write(_song_path(song_id), song)
-    return len(kept) < before
+    remaining = c.table("sections").select("id").eq("song_id", song_id)\
+        .order("order_index").execute().data or []
+    for i, s in enumerate(remaining):
+        c.table("sections").update({"order_index": i}).eq("id", s["id"]).execute()
+    return True
 
 
 def reorder_sections(song_id: str, ordered_ids: list[str]) -> dict | None:
-    song = _load(song_id)
-    if song is None:
-        return None
-    index = {sid: i for i, sid in enumerate(ordered_ids)}
-    song["sections"].sort(key=lambda s: index.get(s["id"], 999))
-    for i, s in enumerate(song["sections"]):
-        s["order"] = i
-    song["updated_at"] = _now()
-    _atomic_write(_song_path(song_id), song)
-    return song
+    c = get_client()
+    for i, sid in enumerate(ordered_ids):
+        c.table("sections").update({"order_index": i})\
+            .eq("id", sid).eq("song_id", song_id).execute()
+    return get_song(song_id)
 
 
-# ── Section audio ──────────────────────────────────────────────────────────
+# ── Section audio (Supabase Storage) ─────────────────────────────────────────
 
 def save_section_audio(song_id: str, section_id: str, src_path: str, ext: str) -> str | None:
-    """Copy a hum recording into permanent storage and link it to the section."""
-    song = _load(song_id)
-    if song is None:
+    c = get_client()
+    if not c.table("sections").select("id")\
+            .eq("id", section_id).eq("song_id", song_id).limit(1).execute().data:
         return None
-    ext = (ext or "webm").lstrip(".")
-    filename = f"{song_id}_{section_id}.{ext}"
-    dest = AUDIO_DIR / filename
-    shutil.copyfile(src_path, dest)
-    update_section(song_id, section_id, {"audio_file": filename})
-    return filename
+    ext = (ext or "webm").lstrip(".").lower()
+    path = f"{song_id}/{section_id}.{ext}"
+    with open(src_path, "rb") as f:
+        data = f.read()
+    # Overwrite any previous take
+    try:
+        c.storage.from_(BUCKET).remove([path])
+    except Exception:
+        pass
+    c.storage.from_(BUCKET).upload(
+        path, data, {"content-type": _MIME.get(ext, "audio/webm")}
+    )
+    c.table("sections").update({"audio_file": path})\
+        .eq("id", section_id).eq("song_id", song_id).execute()
+    return path
 
 
-def audio_path(filename: str) -> Path | None:
-    if not filename:
+def get_audio_public_url(path: str) -> str | None:
+    if not path:
         return None
-    p = AUDIO_DIR / filename
-    return p if p.exists() else None
-
-
-def _delete_section_audio(section: dict) -> None:
-    fn = section.get("audio_file")
-    if fn:
-        p = AUDIO_DIR / fn
-        if p.exists():
-            p.unlink(missing_ok=True)
+    try:
+        return get_client().storage.from_(BUCKET).get_public_url(path)
+    except Exception:
+        return None
 
 
 # ── Full-song assembly ──────────────────────────────────────────────────────
 
 def assemble_song_text(song_id: str) -> str:
-    """Plain-text export of the whole arrangement in order."""
-    song = _load(song_id)
+    song = get_song(song_id)
     if song is None:
         return ""
     blocks = [f"# {song.get('title', 'Untitled')}"]
-    meta = f"{song.get('bpm', '?')} BPM · {song.get('key', 'auto')} · {song.get('genre', '')}"
-    blocks.append(meta)
+    blocks.append(f"{song.get('bpm', '?')} BPM · {song.get('key', 'auto')} · {song.get('genre', '')}")
     blocks.append("")
     for section in song.get("sections", []):
         label = section.get("label") or section.get("type", "Section").title()

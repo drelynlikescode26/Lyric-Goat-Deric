@@ -11,5 +11,7 @@
   envVars = [
     { key = "ANTHROPIC_API_KEY", generateValue = false },
     { key = "OPENAI_API_KEY", generateValue = false },
+    { key = "SUPABASE_URL", generateValue = false },
+    { key = "SUPABASE_KEY", generateValue = false },
     { key = "FLASK_SECRET_KEY", generateValue = true }
   ]

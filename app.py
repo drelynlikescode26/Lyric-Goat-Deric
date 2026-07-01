@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template, send_file, redirect
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -249,10 +249,10 @@ def api_get_section_audio(song_id, section_id):
     section = next((s for s in song.get("sections", []) if s["id"] == section_id), None)
     if section is None or not section.get("audio_file"):
         return jsonify({"error": "No audio"}), 404
-    path = projects.audio_path(section["audio_file"])
-    if path is None:
+    url = projects.get_audio_public_url(section["audio_file"])
+    if not url:
         return jsonify({"error": "Audio file missing"}), 404
-    return send_file(str(path))
+    return redirect(url)
 
 
 @app.route("/api/songs/<song_id>/export", methods=["GET"])
