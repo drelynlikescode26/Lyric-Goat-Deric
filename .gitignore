@@ -2,6 +2,10 @@
 uploads/
 data/
 __pycache__/
+benchmarks/dataset.json
+benchmarks/clips/*
+!benchmarks/clips/.gitkeep
+benchmarks/reports/
 *.pyc
 *.pyo
 *.pyd

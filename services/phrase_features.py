@@ -57,6 +57,7 @@ def extract_phrase_features(
     onset_times: np.ndarray,
     duration: float,
     global_vowel_family: str = None,
+    pitch_track: tuple | None = None,
 ) -> list:
     """
     Augment each phrase with the full feature set.
@@ -66,18 +67,21 @@ def extract_phrase_features(
         return phrase_map
 
     # Pitch contour — computed once for the whole signal
-    try:
-        f0, voiced_flag, _ = librosa.pyin(
-            y,
-            fmin=float(librosa.note_to_hz("C2")),
-            fmax=float(librosa.note_to_hz("C7")),
-            sr=sr,
-        )
-        pitch_times = librosa.times_like(f0, sr=sr)
-    except Exception:
-        f0 = np.array([])
-        voiced_flag = np.array([], dtype=bool)
-        pitch_times = np.array([])
+    if pitch_track is not None:
+        f0, voiced_flag, pitch_times = pitch_track
+    else:
+        try:
+            f0, voiced_flag, _ = librosa.pyin(
+                y,
+                fmin=float(librosa.note_to_hz("C2")),
+                fmax=float(librosa.note_to_hz("C7")),
+                sr=sr,
+            )
+            pitch_times = librosa.times_like(f0, sr=sr)
+        except Exception:
+            f0 = np.array([])
+            voiced_flag = np.array([], dtype=bool)
+            pitch_times = np.array([])
 
     global_rms = float(np.sqrt(np.mean(y ** 2))) if len(y) > 0 else 1e-6
 
