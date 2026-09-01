@@ -1,15 +1,20 @@
-[build]
-  [build.environment]
-  PYTHON_VERSION = "3.11.9"
-
-[deploy]
-  startCommand = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2"
-
-[[services]]
-  type = "web"
-  name = "lyric-goat"
-  envVars = [
-    { key = "ANTHROPIC_API_KEY", generateValue = false },
-    { key = "OPENAI_API_KEY", generateValue = false },
-    { key = "FLASK_SECRET_KEY", generateValue = true }
-  ]
+services:
+  - type: web
+    name: lyric-goat
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1 --threads 4
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: LYRIC_GOAT_TRANSCRIPTION_MODE
+        value: timed
+      - key: MELODY_NOTE_PROVIDER
+        value: pyin

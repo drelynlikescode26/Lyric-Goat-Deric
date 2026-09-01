@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from services.transcribe import transcribe_audio
+from services.transcribe import TranscriptionError, transcribe_audio
 from services.analyze import analyze_flow, preanalyze_audio, syllable_rhythm_string
 from services.generate import generate_lyrics, generate_single_line
-from services.preprocess import preprocess
+from services.preprocess import preprocess_branches
 from services import projects
+from services import writing_profile
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -34,6 +35,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
 @app.route("/process", methods=["POST"])
 def process():
     if "audio" not in request.files or request.files["audio"].filename == "":
@@ -44,7 +50,7 @@ def process():
     tmp_file = tempfile.NamedTemporaryFile(suffix=f".{ext}", dir=UPLOAD_FOLDER, delete=False)
     f.save(tmp_file.name)
     audio_path = tmp_file.name
-    clean_path = None
+    derived_paths = []
 
     try:
         tone     = request.form.get("tone", "melodic")
@@ -56,24 +62,34 @@ def process():
         manual_bpm = float(request.form.get("manual_bpm", "0") or "0")
         hum_mode   = request.form.get("hum_mode", "false").lower() == "true"
 
-        clean_path = preprocess(audio_path)
+        branches = preprocess_branches(audio_path)
+        speech_path = branches["speech_path"]
+        melody_path = branches["melody_path"]
+        derived_paths.extend([speech_path, melody_path])
+        transcription_diagnostics = {
+            "mode": "skipped",
+            "status": "skipped",
+            "reason": "hum_mode",
+            "errors": [],
+        }
 
         if hum_mode:
             # Skip transcription entirely — pure audio analysis only.
             # Saves ~3-5s and avoids confusing the model with non-speech audio.
-            pre_data        = preanalyze_audio(clean_path, manual_bpm=manual_bpm)
+            pre_data        = preanalyze_audio(melody_path, manual_bpm=manual_bpm)
             rough_text      = ""
             word_timestamps = []
         else:
             with ThreadPoolExecutor(max_workers=2) as ex:
-                t_future = ex.submit(transcribe_audio, clean_path)
-                a_future = ex.submit(preanalyze_audio, clean_path, manual_bpm)
+                t_future = ex.submit(transcribe_audio, speech_path)
+                a_future = ex.submit(preanalyze_audio, melody_path, manual_bpm)
             transcription   = t_future.result()
             pre_data        = a_future.result()
             rough_text      = transcription["text"]
             word_timestamps = transcription.get("words", [])
+            transcription_diagnostics = transcription.get("diagnostics", {})
 
-        flow_data = analyze_flow(clean_path, word_timestamps, pre_data=pre_data, hum_mode=hum_mode)
+        flow_data = analyze_flow(melody_path, word_timestamps, pre_data=pre_data, hum_mode=hum_mode)
         flow_data["rhythm_string"] = syllable_rhythm_string(flow_data.get("flow_map", []))
 
         versions = generate_lyrics(
@@ -84,12 +100,14 @@ def process():
         return jsonify({
             "success": True,
             "rough_text": rough_text,
+            "transcription": transcription_diagnostics,
             "melody_mode": flow_data.get("melody_mode", False),
             "phrase_map": flow_data.get("phrase_map", []),
             "detected_key": flow_data.get("detected_key"),
             "vowel_family": flow_data.get("vowel_family"),
             "is_repetitive": flow_data.get("is_repetitive", False),
             "debug_phrases": flow_data.get("debug_phrases", []),
+            "note_provider": flow_data.get("note_provider", "pyin"),
             "flow": {
                 "tempo_bpm": flow_data["tempo_bpm"],
                 "flow_style": flow_data["flow_style"],
@@ -99,11 +117,14 @@ def process():
             "versions": versions,
         })
 
+    except TranscriptionError as e:
+        return jsonify({"error": str(e), "transcription": e.diagnostics}), 502
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     finally:
-        for path in (audio_path, clean_path):
+        for path in [audio_path, *derived_paths]:
             if path and os.path.exists(path):
                 os.unlink(path)
 
@@ -129,14 +150,44 @@ def regenerate_line():
         vibe           = data.get("vibe", "introspective")
         gen_mode       = data.get("gen_mode", "cadence")
         key            = data.get("key", "auto")
+        genre          = data.get("genre", "hiphop")
 
         new_line = generate_single_line(
             bar_index, syllable_count, context_lines, locked_lines,
-            rough_text, flow_data, tone, mode, vibe, gen_mode, key
+            rough_text, flow_data, tone, mode, vibe, gen_mode, key, genre
         )
 
         return jsonify({"success": True, "line": new_line})
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/regenerate-all", methods=["POST"])
+def regenerate_all():
+    """Generate new versions from an already-reviewed phrase map.
+
+    This avoids uploading and transcribing the audio again when the artist only
+    changed syllable slots or wants fresh lyric candidates.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        flow_data = data.get("flow_data") or {}
+        phrase_map = flow_data.get("phrase_map") or []
+        if not phrase_map:
+            return jsonify({"error": "No phrase slots provided"}), 400
+
+        versions = generate_lyrics(
+            data.get("rough_text", ""),
+            flow_data,
+            tone=data.get("tone", "melodic"),
+            mode=data.get("mode", "verse"),
+            vibe=data.get("vibe", "introspective"),
+            gen_mode=data.get("gen_mode", "cadence"),
+            key=data.get("key", "auto"),
+            genre=data.get("genre", "hiphop"),
+        )
+        return jsonify({"success": True, "versions": versions, "phrase_map": phrase_map})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -146,6 +197,18 @@ def regenerate_line():
 @app.route("/api/songs", methods=["GET"])
 def api_list_songs():
     return jsonify({"success": True, "songs": projects.list_songs()})
+
+
+@app.route("/api/writing-feedback", methods=["GET", "POST"])
+def api_writing_feedback():
+    if request.method == "GET":
+        limit = request.args.get("limit", 50, type=int)
+        return jsonify({"success": True, "feedback": writing_profile.recent_feedback(limit)})
+    try:
+        entry = writing_profile.record_feedback(request.get_json(silent=True) or {})
+        return jsonify({"success": True, "feedback": entry}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/songs", methods=["POST"])

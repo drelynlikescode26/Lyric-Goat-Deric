@@ -676,6 +676,36 @@ body {
   white-space: nowrap;
 }
 
+.slot-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.slot-step {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.slot-step:hover {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.transcript-bar.slot-edited {
+  border-left-color: var(--gold);
+  background: rgba(245, 158, 11, 0.06);
+}
+
 .flow-stats {
   display: flex;
   gap: 16px;

@@ -4,6 +4,7 @@ import numpy as np
 import librosa
 
 from services.phrase_features import extract_phrase_features, phrase_debug_summary
+from services.melody_providers import basic_pitch_notes, selected_provider
 
 # Semitone bin width for note quantization (in Hz, approximate)
 _NOTE_MERGE_SEMITONES = 1.5  # merge consecutive frames within ±1.5 semitones
@@ -62,6 +63,23 @@ def preanalyze_audio(audio_path: str, manual_bpm: float = 0) -> dict:
     detected_key = _detect_key_kk(y, sr)
     duration     = round(float(len(y) / sr), 2)
 
+    # Compute pitch once and share it with phrase features + note mapping.
+    try:
+        f0, voiced_flag, _ = librosa.pyin(
+            y,
+            fmin=librosa.note_to_hz("C2"),
+            fmax=librosa.note_to_hz("C7"),
+            sr=sr,
+        )
+        pitch_times = librosa.times_like(f0, sr=sr)
+    except Exception:
+        f0 = np.array([])
+        voiced_flag = np.array([], dtype=bool)
+        pitch_times = np.array([])
+
+    provider = selected_provider()
+    provider_notes = basic_pitch_notes(audio_path) if provider == "basic_pitch" else []
+
     return {
         "y":            y,
         "sr":           sr,
@@ -72,6 +90,9 @@ def preanalyze_audio(audio_path: str, manual_bpm: float = 0) -> dict:
         "avg_centroid": avg_centroid,
         "detected_key": detected_key,
         "duration":     duration,
+        "pitch_track":  (f0, voiced_flag, pitch_times),
+        "note_provider": provider,
+        "provider_notes": provider_notes,
     }
 
 
@@ -90,6 +111,9 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
         avg_centroid = pre_data["avg_centroid"]
         detected_key = pre_data["detected_key"]
         duration     = pre_data["duration"]
+        pitch_track  = pre_data.get("pitch_track")
+        note_provider = pre_data.get("note_provider", "pyin")
+        provider_notes = pre_data.get("provider_notes", [])
     else:
         pre_data     = preanalyze_audio(audio_path)
         y            = pre_data["y"]
@@ -101,6 +125,9 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
         avg_centroid = pre_data["avg_centroid"]
         detected_key = pre_data["detected_key"]
         duration     = pre_data["duration"]
+        pitch_track  = pre_data.get("pitch_track")
+        note_provider = pre_data.get("note_provider", "pyin")
+        provider_notes = pre_data.get("provider_notes", [])
 
     # Vowel patterns + repetition detection
     all_words = [w["word"] for w in word_timestamps]
@@ -141,11 +168,16 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
     phrase_map = extract_phrase_features(
         y, sr, phrase_map, onset_times, duration,
         global_vowel_family=vowel_data["vowel_family"],
+        pitch_track=pitch_track,
     )
 
     # Build note map: discrete notes from pyin pitch + onset grid.
     # Attaches note_count to each phrase so the prompt knows exact syllable slots.
-    note_map = _build_note_map(y, sr, onset_times, beat_times, duration)
+    note_map = _build_note_map(
+        y, sr, onset_times, beat_times, duration,
+        pitch_track=pitch_track,
+        provider_notes=provider_notes,
+    )
     phrase_map = _attach_note_counts(phrase_map, note_map)
 
     flow_map = _build_flow_map(word_timestamps, beat_times)
@@ -163,6 +195,7 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
         "flow_map":          flow_map,
         "phrase_map":        phrase_map,
         "note_map":          note_map,
+        "note_provider":     note_provider,
         "melody_mode":       melody_mode,
         "duration":          duration,
         "avg_words_per_beat": _words_per_beat(word_timestamps, beat_times),
@@ -215,6 +248,8 @@ def _build_note_map(
     onset_times: np.ndarray,
     beat_times: np.ndarray,
     total_duration: float,
+    pitch_track: tuple | None = None,
+    provider_notes: list | None = None,
 ) -> list:
     """
     Convert raw onset + pyin pitch data into a list of discrete notes.
@@ -226,21 +261,36 @@ def _build_note_map(
     This gives the prompt exact syllable-slot counts per phrase rather than
     loose caps, matching the syllable-per-note alignment model.
     """
+    if provider_notes:
+        notes = []
+        for item in provider_notes:
+            note = dict(item)
+            midi = int(note.get("pitch_midi", 0))
+            note["pitch_name"] = librosa.midi_to_note(midi) if midi > 0 else "—"
+            note["beat_index"] = (
+                int(np.argmin(np.abs(beat_times - note["start_time"])))
+                if len(beat_times) else 0
+            )
+            notes.append(note)
+        return notes
+
     if len(onset_times) == 0:
         return []
 
     # pyin gives per-frame fundamental frequency + voiced boolean
-    try:
-        f0, voiced_flag, _ = librosa.pyin(
-            y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"),
-            sr=sr
-        )
-    except Exception:
-        f0 = np.zeros(len(y) // 512 + 1)
-        voiced_flag = np.zeros_like(f0, dtype=bool)
-
-    hop_len   = 512
-    frame_times = librosa.frames_to_time(np.arange(len(f0)), sr=sr, hop_length=hop_len)
+    if pitch_track is not None:
+        f0, voiced_flag, frame_times = pitch_track
+    else:
+        try:
+            f0, voiced_flag, _ = librosa.pyin(
+                y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"),
+                sr=sr
+            )
+            frame_times = librosa.times_like(f0, sr=sr)
+        except Exception:
+            f0 = np.zeros(len(y) // 512 + 1)
+            voiced_flag = np.zeros_like(f0, dtype=bool)
+            frame_times = librosa.times_like(f0, sr=sr)
 
     notes = []
     onset_arr = np.array([float(t) for t in onset_times])
