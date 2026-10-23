@@ -209,8 +209,8 @@
       <!-- Hum Mode Toggle -->
       <div class="hum-mode-row">
         <div class="hum-mode-info">
-          <span class="hum-mode-title">HUM MODE</span>
-          <span class="hum-mode-desc">Pure melody analysis — no speech recognition, just cadence &amp; rhythm</span>
+          <span class="hum-mode-title">MELODY FIRST</span>
+          <span class="hum-mode-desc">Hum, mumble or sing. Phrasing is automatic. Turn off to also transcribe spoken words.</span>
         </div>
         <button class="hum-mode-toggle active" id="humModeToggle" type="button">
           <span class="hum-mode-status">ON</span>
@@ -235,7 +235,7 @@
         <div class="control-group">
           <label class="control-label">APPROACH <span class="control-hint">how the AI reads your mumble</span></label>
           <div class="pill-group" data-group="gen_mode">
-            <button class="pill active" data-value="cadence">Cadence — follow the rhythm</button>
+            <button class="pill active" data-value="cadence">Follow my sounds &amp; melody</button>
             <button class="pill" data-value="literal">Literal — decode the words</button>
             <button class="pill" data-value="creative">Creative — vibe only</button>
           </div>
@@ -309,7 +309,8 @@
 
         <!-- Phrase timeline -->
         <div class="timeline-wrap" id="timelineWrap">
-          <div class="timeline-label">PHRASE MAP — click any block to seek</div>
+          <div class="timeline-label">AUTOMATIC PHRASES - tap to replay; edits are optional</div>
+          <p id="performanceSummary" class="performance-summary"></p>
           <div class="timeline-track" id="timelineTrack">
             <div class="timeline-playhead" id="timelinePlayhead"></div>
           </div>

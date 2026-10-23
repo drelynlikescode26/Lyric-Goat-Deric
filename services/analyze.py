@@ -5,6 +5,7 @@ import librosa
 
 from services.phrase_features import extract_phrase_features, phrase_debug_summary
 from services.melody_providers import basic_pitch_notes, selected_provider
+from services.performance import vocal_phrases, attach_performance
 
 # Semitone bin width for note quantization (in Hz, approximate)
 _NOTE_MERGE_SEMITONES = 1.5  # merge consecutive frames within ±1.5 semitones
@@ -133,36 +134,16 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
     all_words = [w["word"] for w in word_timestamps]
     vowel_data = _detect_vowel_patterns(all_words)
 
-    # Phrase detection — choose audio-based or transcript-based
-    raw_phrases = _detect_phrases(word_timestamps, gap_threshold=0.35)
-    phrases     = _split_long_phrases(raw_phrases, max_syllables=MAX_SYLLABLES_PER_BAR)
-
-    # Decide whether transcript is usable.
-    # Criteria: must have ≥3 words AND transcript captured ≥30% of expected syllables.
-    enough_words = len(word_timestamps) >= 3
-    total_transcript_syls = sum(
-        sum(_count_syllables(w["word"]) for w in p) for p in phrases
-    ) if phrases else 0
-    onset_expected = len(onset_times)
-    transcript_too_sparse = (
-        onset_expected > 5 and total_transcript_syls < onset_expected * 0.30
-    )
-
-    if not hum_mode and phrases and enough_words and not transcript_too_sparse:
-        phrase_map = _build_phrase_map(phrases, beat_times)
-        melody_mode = vowel_data["is_repetitive"]
-    else:
-        # Pure audio path: hum mode OR transcript unusable
-        phrase_map = _build_melody_phrase_map(y, sr, onset_times, beat_times, duration)
-        melody_mode = True
-
-    if phrase_map and phrase_map[-1].get("end_time", 0) <= phrase_map[-1]["start_time"]:
-        phrase_map[-1]["end_time"] = duration
-
-    # For transcript-based maps with low-confidence phrases,
-    # correct syllable counts using audio energy peaks.
-    if not melody_mode:
-        phrase_map = _correct_syllables_from_audio(phrase_map, y, sr)
+    # Vocal activity and syllable nuclei own timing, even if ASR guesses words.
+    # A long held note must not split merely because note onsets are far apart.
+    phrase_map = vocal_phrases(y, sr, tempo)
+    melody_mode = hum_mode or vowel_data["is_repetitive"] or not word_timestamps
+    for phrase in phrase_map:
+        words = [w["word"] for w in word_timestamps
+                 if phrase["start_time"] <= (w.get("start", 0) + w.get("end", 0)) / 2 < phrase["end_time"]]
+        phrase["words"] = words
+        phrase["text"] = " ".join(words)
+        phrase["beat_index"] = int(np.argmin(np.abs(beat_times - phrase["start_time"]))) if len(beat_times) else 0
 
     # Enrich each phrase with full feature set
     phrase_map = extract_phrase_features(
@@ -171,14 +152,13 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
         pitch_track=pitch_track,
     )
 
-    # Build note map: discrete notes from pyin pitch + onset grid.
-    # Attaches note_count to each phrase so the prompt knows exact syllable slots.
+    # Pitch notes describe melody; they never determine syllable count.
     note_map = _build_note_map(
         y, sr, onset_times, beat_times, duration,
         pitch_track=pitch_track,
         provider_notes=provider_notes,
     )
-    phrase_map = _attach_note_counts(phrase_map, note_map)
+    phrase_map = attach_performance(phrase_map, note_map, tempo)
 
     flow_map = _build_flow_map(word_timestamps, beat_times)
     flow_style = _classify_flow(tempo, energy_ratio, avg_centroid, word_timestamps)
@@ -189,7 +169,7 @@ def analyze_flow(audio_path: str, word_timestamps: list, pre_data: dict | None =
     return {
         "tempo_bpm":         tempo,
         "beat_count":        len(beat_times),
-        "syllable_count":    len(onset_times),
+        "syllable_count":    sum(p["target_syllables"] for p in phrase_map),
         "energy_ratio":      round(energy_ratio, 3),
         "flow_style":        flow_style,
         "flow_map":          flow_map,
@@ -274,99 +254,54 @@ def _build_note_map(
             notes.append(note)
         return notes
 
-    if len(onset_times) == 0:
-        return []
-
-    # pyin gives per-frame fundamental frequency + voiced boolean
-    if pitch_track is not None:
-        f0, voiced_flag, frame_times = pitch_track
+    # Follow stable voiced pitch changes as well as repeated-note attacks.
+    if pitch_track is None:
+        f0, voiced_flag, _ = librosa.pyin(y, fmin=librosa.note_to_hz("C2"),
+                                          fmax=librosa.note_to_hz("C7"), sr=sr)
+        frame_times = librosa.times_like(f0, sr=sr)
     else:
-        try:
-            f0, voiced_flag, _ = librosa.pyin(
-                y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"),
-                sr=sr
-            )
-            frame_times = librosa.times_like(f0, sr=sr)
-        except Exception:
-            f0 = np.zeros(len(y) // 512 + 1)
-            voiced_flag = np.zeros_like(f0, dtype=bool)
-            frame_times = librosa.times_like(f0, sr=sr)
-
+        f0, voiced_flag, frame_times = pitch_track
+    if not len(f0):
+        return []
+    from scipy.ndimage import median_filter
+    midi = np.zeros(len(f0))
+    valid = np.asarray(voiced_flag) & np.isfinite(f0) & (f0 > 0)
+    midi[valid] = librosa.hz_to_midi(f0[valid])
+    smooth = median_filter(midi, size=3)
+    hop_seconds = 512 / sr
     notes = []
-    onset_arr = np.array([float(t) for t in onset_times])
+    start = None
+    pitch = 0.
 
-    for i, t_start in enumerate(onset_arr):
-        t_end = float(onset_arr[i + 1]) if i + 1 < len(onset_arr) else total_duration
-        duration = t_end - t_start
+    def append_note(end):
+        if start is None or end - start < .06:
+            return
+        m = int(round(pitch))
+        notes.append({"start_time": round(start, 3), "end_time": round(end, 3),
+                      "duration": round(end - start, 3), "pitch_midi": m,
+                      "pitch_name": librosa.midi_to_note(m),
+                      "beat_index": int(np.argmin(np.abs(beat_times - start))) if len(beat_times) else 0})
 
-        # Get pyin frames in this note window
-        mask = (frame_times >= t_start) & (frame_times < t_end) & voiced_flag
-        voiced_f0 = f0[mask]
-
-        if len(voiced_f0) > 0 and np.any(voiced_f0 > 0):
-            avg_hz = float(np.nanmedian(voiced_f0[voiced_f0 > 0]))
-            pitch_midi = round(librosa.hz_to_midi(avg_hz))
-            pitch_midi = int(np.clip(pitch_midi, 0, 127))
-            pitch_name = librosa.midi_to_note(pitch_midi)
-        else:
-            pitch_midi = 0
-            pitch_name = "—"
-
-        beat_idx = 0
-        if len(beat_times) > 0:
-            beat_idx = int(np.argmin(np.abs(beat_times - t_start)))
-
-        notes.append({
-            "start_time":  round(t_start, 3),
-            "end_time":    round(t_end, 3),
-            "duration":    round(duration, 3),
-            "pitch_midi":  pitch_midi,
-            "pitch_name":  pitch_name,
-            "beat_index":  beat_idx,
-        })
-
+    for i, t in enumerate(frame_times):
+        if not valid[i] or smooth[i] <= 0:
+            append_note(float(t))
+            start = None
+            continue
+        if start is None:
+            start, pitch = float(t), float(smooth[i])
+            continue
+        new_pitch = abs(smooth[i] - pitch) >= _NOTE_MERGE_SEMITONES
+        attack = bool(np.any(np.abs(onset_times - t) < hop_seconds / 2))
+        if (new_pitch or attack) and t - start >= .09:
+            append_note(float(t))
+            start, pitch = float(t), float(smooth[i])
+    append_note(min(total_duration, float(frame_times[-1]) + hop_seconds))
     return notes
 
 
 def _attach_note_counts(phrase_map: list, note_map: list) -> list:
-    """
-    For each phrase, count how many notes fall inside its time window and
-    store as `note_count`. Also compute `note_pitch_range` (semitone span)
-    and `avg_pitch_midi` for the phrase — used in prompt constraints.
-    """
-    if not note_map:
-        return phrase_map
-
-    for phrase in phrase_map:
-        t0 = phrase.get("start_time", 0)
-        t1 = phrase.get("end_time", t0 + 0.5)
-
-        phrase_notes = [
-            n for n in note_map
-            if n["start_time"] >= t0 - 0.05 and n["start_time"] < t1 + 0.05
-        ]
-
-        voiced = [n["pitch_midi"] for n in phrase_notes if n["pitch_midi"] > 0]
-
-        phrase["note_count"]      = len(phrase_notes)
-        phrase["note_pitch_range"] = (max(voiced) - min(voiced)) if len(voiced) > 1 else 0
-        phrase["avg_pitch_midi"]   = round(float(np.mean(voiced))) if voiced else 0
-
-        # Use note_count as the authoritative syllable target when it's
-        # more informative than the transcript syllable count.
-        # Only override if note_count is within a 2x range of transcript syls
-        # (prevents noisy onsets from blowing up the count).
-        transcript_syls = phrase.get("syllables", 0)
-        if len(phrase_notes) > 0:
-            ratio = len(phrase_notes) / max(transcript_syls, 1)
-            if 0.5 <= ratio <= 2.0:
-                phrase["target_syllables"] = len(phrase_notes)
-            else:
-                phrase["target_syllables"] = transcript_syls
-        else:
-            phrase["target_syllables"] = transcript_syls
-
-    return phrase_map
+    """Compatibility helper: notes remain metadata, not syllable targets."""
+    return attach_performance(phrase_map, note_map)
 
 
 def _detect_vowel_patterns(words: list) -> dict:

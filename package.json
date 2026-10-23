@@ -1,0 +1,7 @@
+{
+  "name": "lyric-goat-ui-tests",
+  "private": true,
+  "scripts": { "test": "node tests/frontend.cjs" },
+  "devDependencies": { "jsdom": "30.1.3" },
+  "engines": { "node": ">=22.12.0" }
+}

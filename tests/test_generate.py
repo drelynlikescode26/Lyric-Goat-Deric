@@ -12,7 +12,7 @@ class StructuredGenerationTests(unittest.TestCase):
         payload = {
             "melodic": "I keep moving",
             "rap": "Still on the run",
-            "punchy": "Won't fold",
+            "punchy": "I won't fold now",
         }
         messages = MagicMock()
         messages.create.return_value = SimpleNamespace(

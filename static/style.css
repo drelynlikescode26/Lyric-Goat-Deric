@@ -1895,3 +1895,7 @@ body {
   .section-type-grid { grid-template-columns: repeat(2, 1fr); }
   .song-select-btn { max-width: 180px; }
 }
+
+.performance-summary { color: var(--text-muted, #9ba4b5); font-size: .85rem; line-height: 1.5; }
+.quality-warning { margin: .75rem 1rem; padding: .7rem; border-left: 3px solid #d9a441; color: #e7c98b; font-size: .85rem; }
+.line-loop-btn { background: transparent; border: 0; color: inherit; cursor: pointer; padding: .3rem; }

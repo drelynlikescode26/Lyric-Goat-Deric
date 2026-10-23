@@ -13,6 +13,8 @@ let syncInterval = null;
 let activeSyncCard = null;
 let currentRoughText = "";
 let currentFlowData = {};
+let phraseLoop = null;
+let bpmIsManual = false;
 
 // Per-version lock state: { versionName: { lineIdx: lockedText } }
 let lockedLines = {};
@@ -98,6 +100,7 @@ bpmUpBtn.addEventListener("mousedown",   () => startBpmHold(1));
 });
 
 function setBpm(val) {
+  bpmIsManual = true;
   metroBpm = Math.min(220, Math.max(40, val));
   bpmValueEl.textContent = metroBpm;
   document.querySelectorAll(".bpm-preset").forEach((b) => {
@@ -112,6 +115,7 @@ metroToggle.addEventListener("click", () => {
 
 function startMetronome() {
   if (metroRunning) return;
+  bpmIsManual = true;
   metroCtx = new (window.AudioContext || window.webkitAudioContext)();
   metroRunning = true;
   beatCount = 0;
@@ -359,6 +363,7 @@ document.getElementById("regenerateAllBtn").addEventListener("click", async () =
       body: JSON.stringify({
         rough_text: currentRoughText,
         flow_data: currentFlowData,
+        locked_versions: lockedLines,
         tone: state.tone,
         mode: state.mode,
         vibe: state.vibe,
@@ -403,7 +408,7 @@ generateBtn.addEventListener("click", async () => {
   formData.append("key", keyValue);
   formData.append("genre",      state.genre);
   formData.append("hum_mode",   state.humMode.toString());
-  formData.append("manual_bpm", metroBpm.toString());
+  formData.append("manual_bpm", bpmIsManual ? metroBpm.toString() : "0");
 
   try {
     const res = await fetch("/process", { method: "POST", body: formData });
@@ -429,8 +434,9 @@ function setGenerating(loading) {
    ══════════════════════════════════════ */
 function renderResults(data) {
   stopSync();
+  phraseLoop = null;
   resultsSection.classList.remove("hidden");
-  lockedLines = {};
+  lockedLines = data.locked_versions || {};
 
   currentPhraseMap = data.phrase_map || [];
   audioDuration = data.flow?.duration || 0;
@@ -443,7 +449,15 @@ function renderResults(data) {
     is_repetitive: data.is_repetitive,
     tempo_bpm:    data.flow?.tempo_bpm,
     flow_style:   data.flow?.flow_style,
+    listening:    data.listening || {},
   };
+  const summary = document.getElementById("performanceSummary");
+  if (summary) {
+    const heard = data.listening || {};
+    summary.textContent = heard.status === "ok"
+      ? `Phrases timed automatically. Delivery: ${(heard.feel || []).join(", ") || "follow your take"}.`
+      : "Phrases timed automatically from your vocal. Audio listening is unavailable; using local rhythm and melody analysis.";
+  }
 
   // Organized transcript
   renderOrganizedTranscript(currentRoughText, currentPhraseMap, data.melody_mode);
@@ -512,7 +526,7 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
 
   const bars = phraseMap.map((phrase, i) => {
     const syls = phrase.syllables || 0;
-    const placeholder = makeSyllablePlaceholder(syls);
+    const placeholder = phrase.phonetic_hint || makeSyllablePlaceholder(syls);
     const whisperText = phrase.text || "";
 
     return `<div class="transcript-bar" data-index="${i}">
@@ -550,7 +564,9 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
         const next = Math.max(1, Math.min(16, (phrase.target_syllables || phrase.syllables || 1) + delta));
         phrase.syllables = next;
         phrase.target_syllables = next;
-        phrase.max_syllables = next + 1;
+        phrase.max_syllables = next + (next <= 2 ? 0 : 1);
+        phrase.max_words = next;
+        phrase.syllable_slots = [];
         bar.querySelector(".bar-placeholder").textContent = makeSyllablePlaceholder(next);
         bar.querySelector(".bar-syls").textContent = `${next} syl`;
         bar.classList.add("slot-edited");
@@ -634,17 +650,20 @@ function createVersionCard(version, isBest, phraseMap) {
   const card = document.createElement("div");
   card.className = "version-card";
   card.dataset.versionName = version.name;
+  card.lyricVersion = version;
 
   const scorePercent = Math.round((version.score || 0) * 100);
   const lines = (version.lyrics || "").split("\n").filter((l) => l.trim());
 
   const lyricsHtml = lines.map((line, lineIdx) => {
-    const syls = phraseMap[lineIdx]?.syllables || "?";
-    return `<div class="lyric-line" data-line="${lineIdx}">
+    const syls = phraseMap[lineIdx]?.target_syllables || phraseMap[lineIdx]?.syllables || "?";
+    const isLocked = lockedLines[version.name]?.[lineIdx] !== undefined;
+    return `<div class="lyric-line ${isLocked ? "line-locked" : ""}" data-line="${lineIdx}">
       <span class="lyric-text">${escapeHtml(line)}</span>
       <span class="line-controls">
         <span class="line-syls">${syls}</span>
-        <button class="line-lock-btn" data-line="${lineIdx}" title="Lock this line">🔓</button>
+        <button class="line-loop-btn" data-line="${lineIdx}" title="Loop this vocal phrase">↺</button>
+        <button class="line-lock-btn" data-line="${lineIdx}" title="Lock this line">${isLocked ? "🔒" : "🔓"}</button>
         <button class="line-regen-btn" data-line="${lineIdx}" title="Regenerate this line">↻</button>
       </span>
     </div>`;
@@ -652,20 +671,21 @@ function createVersionCard(version, isBest, phraseMap) {
 
   card.innerHTML = `
     <div class="version-header">
-      <span class="version-name">${version.label || version.name}</span>
+      <span class="version-name">${escapeHtml(version.label || version.name)}</span>
       <div class="version-badge">
-        ${isBest ? '<span class="best-label">⭐ Best Match</span>' : ""}
+        ${isBest ? '<span class="best-label">Closest fit estimate</span>' : ""}
         <div class="score-bar-wrap">
           <div class="score-bar" style="width: ${scorePercent}%"></div>
         </div>
       </div>
     </div>
     <div class="version-lyrics karaoke-lyrics">${lyricsHtml}</div>
+    ${version.quality_status === "needs_review" ? '<p class="quality-warning">Some lines still need a fit or wording pass. Replay your take to compare.</p>' : ""}
     <div class="card-actions">
       <button class="copy-btn" data-lyrics="${encodeURIComponent(version.lyrics || "")}">Copy</button>
       ${phraseMap.length ? '<button class="sync-btn">▶ Play Synced</button>' : ""}
       <button class="save-section-btn" title="Save this version into the current song section">💾 Save to Song</button>
-      ${version.score_breakdown ? '<button class="score-breakdown-btn">Why this won ▾</button>' : ""}
+      ${version.score_breakdown ? '<button class="score-breakdown-btn">Fit breakdown ▾</button>' : ""}
     </div>
     ${version.score_breakdown ? buildScoreBreakdownPanel(version.score_breakdown) : ""}
   `;
@@ -701,6 +721,19 @@ function createVersionCard(version, isBest, phraseMap) {
   // Regenerate single line buttons
   card.querySelectorAll(".line-regen-btn").forEach((btn) => {
     btn.addEventListener("click", () => regenerateSingleLine(card, version.name, parseInt(btn.dataset.line)));
+  });
+  card.querySelectorAll(".line-loop-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const phrase = phraseMap[parseInt(btn.dataset.line)];
+      if (!phrase) return;
+      phraseLoop = phraseLoop === phrase ? null : phrase;
+      if (phraseLoop) {
+        audioPreview.currentTime = phrase.start_time;
+        audioPreview.play();
+      } else {
+        audioPreview.pause();
+      }
+    });
   });
 
   return card;
@@ -749,7 +782,7 @@ async function regenerateSingleLine(card, versionName, lineIdx) {
     el.querySelector(".lyric-text").textContent
   );
 
-  const syllableCount = currentPhraseMap[lineIdx]?.syllables || 8;
+  const syllableCount = currentPhraseMap[lineIdx]?.target_syllables || currentPhraseMap[lineIdx]?.syllables || 8;
   const versionLocked = lockedLines[versionName] || {};
 
   try {
@@ -772,13 +805,21 @@ async function regenerateSingleLine(card, versionName, lineIdx) {
       }),
     });
     const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Rewrite failed");
     if (data.success && data.line) {
       textEl.textContent = data.line;
+      const updatedLines = contextLines.slice();
+      updatedLines[lineIdx] = data.line;
+      card.lyricVersion.lyrics = updatedLines.join("\n");
+      card.lyricVersion.score_breakdown = null;
+      card.lyricVersion.quality_status = "edited";
+      card.querySelector(".copy-btn").dataset.lyrics = encodeURIComponent(card.lyricVersion.lyrics);
+      card.querySelectorAll(".score-breakdown-btn, .score-breakdown-panel, .best-label, .score-bar-wrap").forEach((el) => el.remove());
       lineEl.classList.add("line-refreshed");
       setTimeout(() => lineEl.classList.remove("line-refreshed"), 1200);
     }
   } catch (err) {
-    console.error("Regenerate line failed:", err);
+    alert(err.message);
   } finally {
     regenBtn.textContent = "↻";
     regenBtn.disabled = false;
@@ -793,6 +834,7 @@ async function regenerateSingleLine(card, versionName, lineIdx) {
    phrase is playing. Accurate.
    ══════════════════════════════════════ */
 function startSync(card, btn, phraseMap) {
+  phraseLoop = null;
   stopSync();
   activeSyncCard = card;
   btn.textContent = "■ Stop Sync";
@@ -836,13 +878,8 @@ function stopSync() {
 }
 
 function getCurrentPhraseIndex(currentTime) {
-  if (!currentPhraseMap.length) return -1;
-  let idx = 0;
-  for (let i = 0; i < currentPhraseMap.length; i++) {
-    if (currentTime >= currentPhraseMap[i].start_time) idx = i;
-    else break;
-  }
-  return idx;
+  return currentPhraseMap.findIndex((phrase) =>
+    currentTime >= phrase.start_time && currentTime < phrase.end_time);
 }
 
 /* ══════════════════
@@ -861,7 +898,7 @@ function escapeHtml(str) {
 }
 
 /* ══════════════════════════════════════
-   SCORE BREAKDOWN ("Why this won")
+   SCORE BREAKDOWN ("Fit breakdown")
    Expandable panel per version card.
    Shows per-factor score contributions
    and overflow penalty if present.
@@ -874,10 +911,11 @@ const SCORE_LABELS = {
   vowel_affinity: "Vowel affinity",
   singability:    "Singability",
   density_fit:    "Density fit",
+  craft:          "Stock-phrase check",
 };
 const SCORE_WEIGHTS_UI = {
-  syllable_fit: 0.35, word_count_fit: 0.15, stress_fit: 0.15,
-  rhyme: 0.15, vowel_affinity: 0.05, singability: 0.10, density_fit: 0.05,
+  syllable_fit: 0.30, word_count_fit: 0.10, stress_fit: 0.15,
+  rhyme: 0.10, vowel_affinity: 0.10, singability: 0.10, density_fit: 0.05, craft: 0.10,
 };
 
 function buildScoreBreakdownPanel(bd) {
@@ -910,7 +948,7 @@ function buildScoreBreakdownPanel(bd) {
   </div>`;
 }
 
-// Wire "Why this won" toggle (uses event delegation on versionsContainer)
+// Wire "Fit breakdown" toggle (uses event delegation on versionsContainer)
 versionsContainer.addEventListener("click", (e) => {
   const btn = e.target.closest(".score-breakdown-btn");
   if (!btn) return;
@@ -918,7 +956,7 @@ versionsContainer.addEventListener("click", (e) => {
   if (!panel) return;
   const open = !panel.classList.contains("hidden");
   panel.classList.toggle("hidden", open);
-  btn.textContent = open ? "Why this won ▾" : "Why this won ▴";
+  btn.textContent = open ? "Fit breakdown ▾" : "Fit breakdown ▴";
 });
 
 /* ══════════════════════════════════════
@@ -1206,6 +1244,9 @@ function setActiveSection(id, openIt = true) {
 
 /* ── Re-open a saved section in the results view ── */
 function openSavedSection(section) {
+  for (const key of ["tone", "mode", "vibe", "gen_mode", "genre"]) {
+    if (section.settings?.[key]) selectPill(key, section.settings[key]);
+  }
   const versions = (section.versions && section.versions.length)
     ? section.versions
     : [{ name: "saved", label: section.label, lyrics: section.lyrics || "", score: 1, score_breakdown: null }];
@@ -1214,6 +1255,8 @@ function openSavedSection(section) {
     success: true,
     rough_text: section.rough_text || "",
     phrase_map: pm,
+    listening: section.settings?.listening || {},
+    locked_versions: section.settings?.locked_lines || {},
     melody_mode: !!(section.settings && section.settings.hum_mode),
     detected_key: (section.settings && section.settings.key) || null,
     vowel_family: null,
@@ -1223,7 +1266,7 @@ function openSavedSection(section) {
       tempo_bpm: section.settings && section.settings.bpm,
       flow_style: "saved",
       syllable_count: pm.reduce((a, p) => a + (p.syllables || 0), 0),
-      duration: pm.length ? (pm[pm.length - 1].end_time || 0) : 0,
+      duration: section.settings?.audio_duration || (pm.length ? (pm[pm.length - 1].end_time || 0) : 0),
     },
     versions,
   };
@@ -1286,6 +1329,9 @@ async function saveVersionToSection(version, btn) {
     gen_mode: state.gen_mode, genre: state.genre, hum_mode: state.humMode,
     key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
     bpm: metroBpm,
+    listening: currentFlowData.listening || {},
+    audio_duration: audioDuration,
+    locked_lines: lockedLines,
   };
 
   try {
@@ -1463,3 +1509,11 @@ document.querySelectorAll(".modal-overlay").forEach((overlay) => {
 
 // Boot the workspace
 loadSongs();
+
+// Loop the original vocal, keeping its untouched time origin.
+audioPreview.addEventListener("timeupdate", () => {
+  if (phraseLoop && !audioPreview.paused && audioPreview.currentTime >= phraseLoop.end_time) {
+    audioPreview.currentTime = phraseLoop.start_time;
+  }
+});
+audioPreview.addEventListener("loadedmetadata", () => { phraseLoop = null; });
