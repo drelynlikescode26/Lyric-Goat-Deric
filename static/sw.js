@@ -1,4 +1,4 @@
-const CACHE = 'lyric-goat-v2';
+const CACHE = 'lyric-goat-v3-melody';
 const STATIC = [
   '/',
   '/static/style.css',

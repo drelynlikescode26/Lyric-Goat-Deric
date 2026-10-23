@@ -2,6 +2,7 @@
 uploads/
 data/
 __pycache__/
+node_modules/
 benchmarks/dataset.json
 benchmarks/clips/*
 !benchmarks/clips/.gitkeep
