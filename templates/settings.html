@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lyric Goat · OpenAI setup</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body><main class="app">
+  <header class="header"><div class="logo">🐐 LYRIC GOAT</div><p class="tagline">Connect once. Keep creating.</p></header>
+  <section class="card setup-card">
+    <h1>OpenAI setup</h1>
+    <p>One OpenAI key handles listening and lyric writing. Your key stays in this Mac's private app settings.</p>
+    {% if saved %}<p role="status">Saved. Your next take uses these settings. <a href="/">Try a take →</a></p>{% endif %}
+    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+    <p>{% if key_present %}A key is saved. Leave the field blank to keep it.{% else %}Add a secret API key from your OpenAI project.{% endif %}</p>
+    <form method="post" action="/settings" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ csrf }}" />
+      <label for="api_key">OpenAI API key</label>
+      <input id="api_key" name="api_key" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" placeholder="sk-…" {% if not key_present %}required{% endif %} />
+      <label for="model">Lyric writer</label>
+      <select name="model" id="model">
+        {% for value, label in models.items() %}<option value="{{ value }}" {% if value == model %}selected{% endif %}>{{ label }} · {{ value }}</option>{% endfor %}
+      </select>
+      <p>Budget writing is the default. Both choices keep the same melody constraints and lyric checks. Compare them with your own takes.</p>
+      <button class="ws-btn" type="submit">Save settings</button>
+    </form>
+    <p>The audio listener uses GPT Audio 1.5 to hear your mumbles and delivery. Lyric rewrites reuse that analysis.</p>
+    <p>API usage is billed separately from ChatGPT. Saving settings makes no paid calls. Generating sends your take to OpenAI; saved songs stay on this Mac.</p>
+    <p><a href="/">Back to the studio →</a></p>
+  </section>
+</main></body>
+</html>

@@ -2,10 +2,12 @@
 import json
 import os
 import anthropic
+from openai import OpenAI, APIError, AuthenticationError, RateLimitError, NotFoundError
 from services.lyric_craft import (CLICHES, clean_lyrics, count_syllables, tokens,
     line_syllable_options, rhyme_match, ending_vowels, stress_fit, validate_lyrics)
 
 GENERATION_MODEL = os.getenv("ANTHROPIC_GENERATION_MODEL", "claude-sonnet-5")
+OPENAI_DEFAULT_MODEL = "gpt-6-luna"
 SCORE_WEIGHTS = {"syllable_fit": .30, "word_count_fit": .10, "stress_fit": .15,
                  "rhyme": .10, "vowel_affinity": .10, "singability": .10,
                  "density_fit": .05, "craft": .10}
@@ -15,10 +17,23 @@ class GenerationError(RuntimeError):
     pass
 
 
-def _client():
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise GenerationError("ANTHROPIC_API_KEY is not configured")
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=55.0, max_retries=0)
+def writer_provider():
+    provider = os.getenv("LYRIC_GOAT_WRITER", "auto").strip().lower()
+    if provider == "auto":
+        return "openai" if os.getenv("OPENAI_API_KEY") else "anthropic"
+    if provider not in {"openai", "anthropic"}:
+        raise GenerationError("Choose openai or anthropic for LYRIC_GOAT_WRITER.")
+    return provider
+
+
+def _client(provider=None):
+    provider = provider or writer_provider()
+    key_name = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
+    if not os.getenv(key_name):
+        raise GenerationError("Add your OpenAI key in Settings to start writing lyrics. "
+                              "Existing Anthropic setups can still use ANTHROPIC_API_KEY.")
+    factory = OpenAI if provider == "openai" else anthropic.Anthropic
+    return factory(api_key=os.environ[key_name], timeout=55.0, max_retries=0)
 
 
 STYLE_DESCRIPTIONS = {
@@ -138,13 +153,38 @@ def _performance_spec(flow):
 def _request(prompt, genre):
     schema = {"type": "object", "properties": {v["name"]: {"type": "string"} for v in STYLE_VARIANTS},
               "required": [v["name"] for v in STYLE_VARIANTS], "additionalProperties": False}
-    response = _client().messages.create(model=GENERATION_MODEL, max_tokens=4096,
-        system=_build_system_prompt(genre), messages=[{"role": "user", "content": prompt}],
-        output_config={"format": {"type": "json_schema", "schema": schema}})
-    if getattr(response, "stop_reason", None) == "max_tokens":
-        raise GenerationError("The writer ran out of room. Try a shorter section.")
-    text = next((block.text for block in response.content if getattr(block, "type", "text") == "text"), "")
-    payload = json.loads(text)
+    provider = writer_provider()
+    try:
+        client = _client(provider)
+        if provider == "openai":
+            response = client.responses.create(
+                model=os.getenv("OPENAI_GENERATION_MODEL", OPENAI_DEFAULT_MODEL),
+                instructions=_build_system_prompt(genre), input=prompt,
+                reasoning={"effort": "low"}, max_output_tokens=4096, store=False,
+                text={"format": {"type": "json_schema", "name": "lyric_versions",
+                                 "strict": True, "schema": schema}})
+            if response.status != "completed":
+                raise GenerationError("The writer did not finish. Try a shorter section.")
+            text = response.output_text
+        else:
+            response = client.messages.create(model=GENERATION_MODEL, max_tokens=4096,
+                system=_build_system_prompt(genre), messages=[{"role": "user", "content": prompt}],
+                output_config={"format": {"type": "json_schema", "schema": schema}})
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                raise GenerationError("The writer ran out of room. Try a shorter section.")
+            text = next((block.text for block in response.content if getattr(block, "type", "text") == "text"), "")
+    except AuthenticationError:
+        raise GenerationError("OpenAI rejected the key. Check your key in Settings.") from None
+    except RateLimitError:
+        raise GenerationError("OpenAI is rate limited or out of API credit. Check API billing, then retry.") from None
+    except NotFoundError:
+        raise GenerationError("The writing model is unavailable for this OpenAI project. Check Settings.") from None
+    except APIError:
+        raise GenerationError("The OpenAI writer is unavailable. Please try again shortly.") from None
+    try:
+        payload = json.loads(text)
+    except (ValueError, TypeError):
+        raise GenerationError("The writer returned an invalid lyric response. Try again.") from None
     if not isinstance(payload, dict) or any(not isinstance(payload.get(v["name"]), str) for v in STYLE_VARIANTS):
         raise GenerationError("The writer returned an invalid lyric response. Try again.")
     return payload

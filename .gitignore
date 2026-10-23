@@ -15,6 +15,7 @@ benchmarks/reports/
 dist/
 build/
 .venv/
+.local-runtime/
 venv/
 env/
 .DS_Store

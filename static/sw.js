@@ -1,4 +1,4 @@
-const CACHE = 'lyric-goat-v3-melody';
+const CACHE = 'lyric-goat-v4-local';
 const STATIC = [
   '/',
   '/static/style.css',
@@ -22,7 +22,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   // Always network-first for API calls
-  if (e.request.url.includes('/process') || e.request.url.includes('/regenerate') || e.request.url.includes('/api/')) {
+  if (e.request.url.includes('/settings') || e.request.url.includes('/process') || e.request.url.includes('/regenerate') || e.request.url.includes('/api/')) {
     return;
   }
   e.respondWith(

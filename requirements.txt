@@ -1,4 +1,4 @@
-flask>=3.0.0
+flask>=3.1.0,<4.0.0
 anthropic>=1.0.0,<2.0.0
 openai>=1.66.0,<3.0.0
 librosa>=0.10.0
@@ -10,3 +10,4 @@ soundfile>=0.12.1
 scipy>=1.11.0
 gunicorn>=21.0.0
 cmudict>=1.0.0,<2.0.0
+waitress>=3.0.2,<4.0.0
