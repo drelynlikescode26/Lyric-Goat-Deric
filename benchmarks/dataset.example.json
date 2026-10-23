@@ -1,0 +1,14 @@
+{
+  "dataset": "deric-v1",
+  "clips": [
+    {
+      "id": "clean-hum-01",
+      "audio": "clips/clean-hum-01.wav",
+      "mode": "hum",
+      "expected_phrases": [
+        {"start_time": 0.4, "end_time": 2.1, "syllables": 5},
+        {"start_time": 2.7, "end_time": 4.5, "syllables": 6}
+      ]
+    }
+  ]
+}

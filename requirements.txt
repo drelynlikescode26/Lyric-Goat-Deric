@@ -1,6 +1,6 @@
 flask>=3.0.0
-anthropic>=0.25.0
-openai>=1.30.0
+anthropic>=1.0.0,<2.0.0
+openai>=1.66.0,<3.0.0
 librosa>=0.10.0
 numpy>=1.26.0
 pydub>=0.25.1

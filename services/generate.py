@@ -2,9 +2,22 @@ import re
 import os
 import json
 import anthropic
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+GENERATION_MODEL = os.getenv("ANTHROPIC_GENERATION_MODEL", "claude-sonnet-5")
+
+
+class GenerationError(RuntimeError):
+    """A lyric provider request could not be started or completed."""
+
+
+def _client() -> anthropic.Anthropic:
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise GenerationError(
+            "ANTHROPIC_API_KEY is not configured. Audio analysis still works, "
+            "but lyric generation needs an Anthropic API key."
+        )
+    return anthropic.Anthropic(api_key=key)
 
 # ── Phonetic mapping ──────────────────────────────────────────────────────────
 PHONETIC_MAP = {
@@ -386,88 +399,13 @@ RULES:
 - Same tone and vibe as other lines
 - Output ONLY the new line"""
 
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
+    msg = _client().messages.create(
+        model=GENERATION_MODEL,
         max_tokens=200,
         system=_build_system_prompt(genre),
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip().strip('"')
-
-
-# ── Verification pass (Haiku) ─────────────────────────────────────────────────
-
-def _verify_and_fix(versions: list, phrase_map: list) -> list:
-    if not phrase_map:
-        return versions
-    targets = [{"bar": i + 1, "syllables": p["syllables"]} for i, p in enumerate(phrase_map)]
-    versions_text = "\n\n".join(f'VERSION: {v["label"]}\n{v["lyrics"]}' for v in versions)
-
-    prompt = f"""Syllable-accuracy editor for song lyrics.
-
-SYLLABLE TARGETS (±1 max):
-{json.dumps(targets, indent=2)}
-
-LYRICS:
-{versions_text}
-
-Fix ONLY lines off by more than 1 syllable. Keep meaning and rhyme.
-Return JSON only: {{"melodic": "...", "rap": "...", "punchy": "..."}}
-Lines separated by \\n. JSON only."""
-
-    try:
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", msg.content[0].text.strip())
-        fixed = json.loads(raw)
-        name_map = {v["name"]: v for v in versions}
-        for k in ("melodic", "rap", "punchy"):
-            if k in fixed and k in name_map and fixed[k].strip():
-                name_map[k]["lyrics"] = fixed[k].strip()
-    except Exception:
-        pass
-    return versions
-
-
-# ── Phrase-level auto-fix ─────────────────────────────────────────────────────
-
-def _autofix_weak_bars(
-    versions: list,
-    flow_data: dict,
-    rough_text: str,
-    tone: str,
-    mode: str,
-    vibe: str,
-    gen_mode: str,
-    key: str,
-) -> list:
-    phrase_map = flow_data.get("phrase_map", [])
-    if not phrase_map:
-        return versions
-
-    for version in versions:
-        lines = [l for l in version["lyrics"].split("\n") if l.strip()]
-        changed = False
-        for i, phrase in enumerate(phrase_map):
-            if i >= len(lines):
-                break
-            target = phrase.get("target_syllables", phrase["syllables"])
-            actual = sum(_count_syllables(w) for w in lines[i].split())
-            if abs(actual - target) > 2:
-                candidate = generate_single_line(
-                    i, target, lines, {}, rough_text,
-                    flow_data, tone, mode, vibe, gen_mode, key,
-                )
-                new_syl = sum(_count_syllables(w) for w in candidate.split())
-                if abs(new_syl - target) < abs(actual - target):
-                    lines[i] = candidate
-                    changed = True
-        if changed:
-            version["lyrics"] = "\n".join(lines)
-    return versions
 
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
@@ -572,6 +510,13 @@ def _score_lyrics(lyrics: str, flow_data: dict) -> tuple[float, dict]:
 
     total = sum(breakdown[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS)
 
+    # A candidate with the wrong number of bars cannot map cleanly to the melody.
+    if phrase_map:
+        bar_delta = abs(len(lines) - len(phrase_map))
+        line_count_fit = max(0.4, 1.0 - 0.2 * bar_delta)
+        total *= line_count_fit
+        breakdown["line_count_fit"] = round(line_count_fit, 3)
+
     # Hard overflow penalty
     overflow = _check_overflow(lines, phrase_map)
     if overflow:
@@ -636,45 +581,67 @@ def generate_lyrics(
     key: str = "auto",
     genre: str = "",
 ) -> list[dict]:
+    """Generate all three candidates in one schema-constrained request.
+
+    The previous implementation made three Sonnet calls, one Haiku verifier
+    call, and potentially several repair calls. This version makes one Sonnet 5
+    call and scores the guaranteed JSON locally.
+    """
     phrase_map       = flow_data.get("phrase_map", [])
     phonetic_anchors = _extract_phonetic_anchors(phrase_map)
 
     system_prompt = _build_system_prompt(genre)
 
-    def _generate_one(variant: dict) -> dict:
+    variant_prompts = []
+    for variant in STYLE_VARIANTS:
         prompt = _build_user_prompt(
-            rough_text, flow_data, tone, mode, vibe, gen_mode, key, variant, phonetic_anchors, genre=genre
+            rough_text, flow_data, tone, mode, vibe, gen_mode, key,
+            variant, phonetic_anchors, genre=genre,
         )
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=system_prompt,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        lyrics = msg.content[0].text.strip()
+        variant_prompts.append(f"### {variant['name'].upper()}\n{prompt}")
+
+    combined_prompt = (
+        "Write all three requested lyric versions. Each JSON value must contain "
+        "only its lyric lines separated by newline characters.\n\n"
+        + "\n\n".join(variant_prompts)
+    )
+    schema = {
+        "type": "object",
+        "properties": {
+            "melodic": {"type": "string"},
+            "rap": {"type": "string"},
+            "punchy": {"type": "string"},
+        },
+        "required": ["melodic", "rap", "punchy"],
+        "additionalProperties": False,
+    }
+
+    msg = _client().messages.create(
+        model=GENERATION_MODEL,
+        max_tokens=3072,
+        system=system_prompt,
+        messages=[{"role": "user", "content": combined_prompt}],
+        output_config={
+            "format": {
+                "type": "json_schema",
+                "schema": schema,
+            }
+        },
+    )
+    text_block = next((block.text for block in msg.content if block.type == "text"), "")
+    payload = json.loads(text_block)
+
+    results = []
+    for variant in STYLE_VARIANTS:
+        lyrics = str(payload[variant["name"]]).strip()
         score, breakdown = _score_lyrics(lyrics, flow_data)
-        return {
-            "name":            variant["name"],
-            "label":           variant["label"],
-            "lyrics":          lyrics,
-            "score":           score,
+        results.append({
+            "name": variant["name"],
+            "label": variant["label"],
+            "lyrics": lyrics,
+            "score": score,
             "score_breakdown": breakdown,
-        }
-
-    # Generate all 3 style variants in parallel — no data dependency between them.
-    with ThreadPoolExecutor(max_workers=len(STYLE_VARIANTS)) as ex:
-        futures = {ex.submit(_generate_one, v): v for v in STYLE_VARIANTS}
-        results = [f.result() for f in as_completed(futures)]
-
-    # Pass 1: Haiku syllable verification
-    results = _verify_and_fix(results, phrase_map)
-
-    # Pass 2: Auto-fix bars still off by >2 syllables
-    results = _autofix_weak_bars(results, flow_data, rough_text, tone, mode, vibe, gen_mode, key)
-
-    # Re-score after fixes
-    for r in results:
-        r["score"], r["score_breakdown"] = _score_lyrics(r["lyrics"], flow_data)
+        })
 
     results.sort(key=lambda x: x["score"], reverse=True)
     return results

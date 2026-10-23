@@ -9,9 +9,16 @@ Turn your mumbles into polished lyrics. Record or upload a raw vocal idea, and t
 3. Hit **Generate** — get 3 lyric versions ranked by flow match
 
 **Pipeline:**
+
+```text
+Audio ─┬─ speech branch (16 kHz) → timed/semantic transcription
+       └─ melody branch (22.05 kHz) → phrasing, pitch, syllable slots
+                            ↓
+              reviewed slots → one structured Claude request → 3 ranked versions
 ```
-Audio → Preprocess (normalize/resample) → Whisper (transcribe) → librosa (flow analysis) → Claude (3 lyric versions)
-```
+
+The branches remain time-aligned. Editing a syllable slot or requesting new
+versions does not upload or transcribe the audio again.
 
 ## Setup
 
@@ -52,6 +59,22 @@ FLASK_SECRET_KEY=any-random-string
 - **Anthropic key** → https://console.anthropic.com
 - **OpenAI key** → https://platform.openai.com (for Whisper transcription)
 
+The app does not call either provider at startup. The offline detector benchmark
+also makes no paid API calls.
+
+### Cost modes
+
+`LYRIC_GOAT_TRANSCRIPTION_MODE` controls transcription:
+
+| Mode | Calls | Behavior |
+|---|---:|---|
+| `timed` | 1 | Default; Whisper word timestamps for slot alignment |
+| `semantic` | 1 | GPT-4o Transcribe text; cadence comes from local analysis |
+| `hybrid` | 2 | Semantic text plus Whisper timing |
+
+Provider failures are returned with diagnostics instead of silently switching
+models. Hum mode skips transcription completely.
+
 ### Run
 
 ```bash
@@ -73,18 +96,41 @@ Open http://localhost:5000
 ```
 app.py                  Flask server + /process endpoint
 services/
-  preprocess.py         pydub: normalize + resample to 16kHz mono WAV
-  transcribe.py         OpenAI Whisper: text + word timestamps
+  preprocess.py         Separate time-aligned speech and melody WAVs
+  transcribe.py         Explicit OpenAI transcription modes + diagnostics
   analyze.py            librosa: tempo, beats, syllables, flow classification
-  generate.py           Claude: 3 lyric versions, auto-scored and ranked
+  melody_providers.py   pYIN plus optional local Basic Pitch adapter
+  generate.py           One structured Claude call, locally scored and ranked
+  projects.py           Local-first songs, sections, and audio
+  writing_profile.py    Accepted/edited/rejected lyric feedback history
+benchmarks/             Personal clip manifest (audio stays gitignored)
+scripts/                Offline detection benchmark
+supabase/               Optional future hosted schema; not active by default
+tests/                  Offline unit and smoke tests
 templates/index.html    UI
 static/style.css        Styles
 static/script.js        Mic recording, file upload, results rendering
 ```
 
+## Detector benchmark (free/local)
+
+Copy `benchmarks/dataset.example.json` to `benchmarks/dataset.local.json`, add
+your own clips under `benchmarks/clips/`, and mark the expected phrase starts,
+ends, and syllable counts. Then run:
+
+```bash
+python scripts/benchmark_detection.py benchmarks/dataset.local.json \
+  --output benchmarks/report.local.json
+```
+
+Personal audio, labels, and reports are ignored by git. To compare Spotify's
+free local Basic Pitch model, install `requirements-melody.txt` and run with
+`MELODY_NOTE_PROVIDER=basic_pitch`.
+
 ## Roadmap
 
 - **V1** (done) — upload/record → transcribe → generate
 - **V2** (done) — syllable matching, flow analysis, multiple outputs, style controls
-- **V3** — phoneme-level analysis, flow locking, style presets trained on your catalog
-- **V4** — Logic Pro plugin, real-time suggestions, melody-aware writing
+- **V3** (active) — real-clip benchmark, editable syllable slots, accepted-line profile
+- **V4** — hosted Supabase storage/auth after the local workflow proves reliable
+- **V5** — Logic/AU plugin only after the web app consistently produces usable lyrics

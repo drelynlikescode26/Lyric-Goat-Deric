@@ -17,7 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-DATA_DIR  = Path("data")
+DATA_DIR  = Path(os.getenv("LYRIC_GOAT_DATA_DIR", "data"))
 SONGS_DIR = DATA_DIR / "songs"
 AUDIO_DIR = DATA_DIR / "audio"
 

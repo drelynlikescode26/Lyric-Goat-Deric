@@ -347,9 +347,39 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   generateBtn.disabled = true;
 });
 
-document.getElementById("regenerateAllBtn").addEventListener("click", () => {
-  if (!(recordedBlob || uploadedFile)) return;
-  generateBtn.click();
+document.getElementById("regenerateAllBtn").addEventListener("click", async () => {
+  if (!currentPhraseMap.length) return;
+  const btn = document.getElementById("regenerateAllBtn");
+  btn.disabled = true;
+  btn.innerHTML = "<span>⏳</span> Writing...";
+  try {
+    const res = await fetch("/regenerate-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rough_text: currentRoughText,
+        flow_data: currentFlowData,
+        tone: state.tone,
+        mode: state.mode,
+        vibe: state.vibe,
+        gen_mode: state.gen_mode,
+        genre: state.genre,
+        key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Regeneration failed");
+    workspace._lastVersions = data.versions || [];
+    versionsContainer.innerHTML = "";
+    (data.versions || []).forEach((v, idx) => {
+      versionsContainer.appendChild(createVersionCard(v, idx === 0, currentPhraseMap));
+    });
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "<span>↻</span> New Versions";
+  }
 });
 
 /* ══════════════════
@@ -491,7 +521,11 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
         <span class="bar-placeholder">${escapeHtml(placeholder)}</span>
         ${whisperText ? `<span class="bar-whisper">${escapeHtml(whisperText)}</span>` : ""}
       </div>
-      <span class="bar-syls">${syls} syl</span>
+      <div class="slot-controls" aria-label="Adjust syllables for bar ${i + 1}">
+        <button class="slot-step" data-action="minus" title="Remove one syllable">−</button>
+        <span class="bar-syls">${syls} syl</span>
+        <button class="slot-step" data-action="plus" title="Add one syllable">+</button>
+      </div>
     </div>`;
   }).join("");
 
@@ -504,6 +538,24 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
         audioPreview.currentTime = currentPhraseMap[idx].start_time;
         audioPreview.play();
       }
+    });
+
+    bar.querySelectorAll(".slot-step").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const idx = parseInt(bar.dataset.index);
+        const phrase = currentPhraseMap[idx];
+        if (!phrase) return;
+        const delta = button.dataset.action === "plus" ? 1 : -1;
+        const next = Math.max(1, Math.min(16, (phrase.target_syllables || phrase.syllables || 1) + delta));
+        phrase.syllables = next;
+        phrase.target_syllables = next;
+        phrase.max_syllables = next + 1;
+        bar.querySelector(".bar-placeholder").textContent = makeSyllablePlaceholder(next);
+        bar.querySelector(".bar-syls").textContent = `${next} syl`;
+        bar.classList.add("slot-edited");
+        currentFlowData.phrase_map = currentPhraseMap;
+      });
     });
   });
 }
@@ -715,6 +767,7 @@ async function regenerateSingleLine(card, versionName, lineIdx) {
         mode: state.mode,
         vibe: state.vibe,
         gen_mode: state.gen_mode,
+        genre: state.genre,
         key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
       }),
     });
@@ -1248,6 +1301,18 @@ async function saveVersionToSection(version, btn) {
     });
     const data = await res.json();
     if (!data.success) throw new Error("save failed");
+
+    // Build a local writing profile without spending another model call.
+    fetch("/api/writing-feedback", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "accepted",
+        song_id: songId,
+        section_id: sectionId,
+        final_line: version.lyrics || "",
+        metadata: { tone: state.tone, vibe: state.vibe, genre: state.genre },
+      }),
+    }).catch((error) => console.warn("Writing feedback was not recorded", error));
 
     const blob = recordedBlob || uploadedFile;
     if (blob) {
