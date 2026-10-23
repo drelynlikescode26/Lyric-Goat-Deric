@@ -56,7 +56,16 @@ class StructuredGenerationTests(unittest.TestCase):
         self.assertFalse(kwargs["store"])
         self.assertEqual(kwargs["max_output_tokens"], 4096)
         self.assertTrue(kwargs["text"]["format"]["strict"])
+        self.assertEqual(kwargs['reasoning'], {'effort':'low'})
         self.assertEqual(factory.call_args.kwargs["max_retries"], 0)
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY":"offline-test", "LYRIC_GOAT_WRITER":"openai", "OPENAI_GENERATION_MODEL":"expensive-override"})
+    @patch('services.generate.OpenAI')
+    def test_writer_is_fixed_to_luna_even_with_old_model_setting(self, factory):
+        factory.return_value.responses.create.return_value = SimpleNamespace(status='completed',
+            output_text=json.dumps({k:'Go' for k in ('melodic','rap','punchy')}))
+        generate._request('test', 'rnb')
+        self.assertEqual(factory.return_value.responses.create.call_args.kwargs['model'], 'gpt-6-luna')
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "offline-test", "LYRIC_GOAT_WRITER": "openai"})
     @patch("services.generate.OpenAI")

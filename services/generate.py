@@ -5,6 +5,8 @@ import anthropic
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, NotFoundError
 from services.lyric_craft import (CLICHES, clean_lyrics, count_syllables, tokens,
     line_syllable_options, rhyme_match, ending_vowels, stress_fit, validate_lyrics)
+from services.writing_rules import (GENRE_RULES, CRAFT_STANDARD, language_mode,
+                                   language_rule, has_profanity, rhyme_intent)
 
 GENERATION_MODEL = os.getenv("ANTHROPIC_GENERATION_MODEL", "claude-sonnet-5")
 OPENAI_DEFAULT_MODEL = "gpt-6-luna"
@@ -62,47 +64,12 @@ STYLE_VARIANTS = [
     {"name": "punchy", "label": "Sharper Writing", "description": "same selected musical style and melody, with fresher detail and stronger phrasing"},
 ]
 
-GENRE_RULES = {
-    "hiphop": (
-        "Genre: Classic hip-hop. Think in 4-bar / 8-bar units. Internal rhyme schemes (AABB, ABAB, multi). "
-        "Punchlines land at bar ends. Wordplay and double meanings. Natural spoken cadence."
-    ),
-    "trap": (
-        "Genre: Trap. Triplet cadence is king — 'baby baby baby', 'riding riding riding'. "
-        "Short melodic hooks. Dark aspirational imagery. Melodic lines sit under the beat. "
-        "Mix melodic sung bars with punchy staccato bars."
-    ),
-    "rnb": (
-        "Genre: R&B. Smooth melodic phrasing. Held vowels on stressed syllables. "
-        "Emotional storytelling — vulnerability over bravado. Runs and ad-libs at phrase ends. "
-        "Lines breathe — don't overstuff. Think Bryson Tiller, SZA, Frank Ocean cadence."
-    ),
-    "pop": (
-        "Genre: Pop. Anthemic and universal. Simple words, massive emotional impact. "
-        "Hooks repeat cleanly. Last word of each line should be singable. "
-        "Short punchy verses, big catchy choruses."
-    ),
-    "drill": (
-        "Genre: Drill. Dark heavy sliding cadence. Monotone delivery with rhythmic punch at line ends. "
-        "Street imagery, grounded and specific. Lines hit hard on the back half."
-    ),
-    "afrobeats": (
-        "Genre: Afrobeats. Rhythmic melodic flow, celebratory even when emotional. "
-        "Call-and-response patterns. Repetition is a feature. "
-        "Lines feel like they're dancing — natural rise and fall. Wizkid, Burna Boy energy."
-    ),
-    "latin": (
-        "Genre: Latin/Reggaeton. Dembow rhythm influence. Melodic hooks over rhythmic verses. "
-        "Lines hit on the 2 and 4 hard. Bad Bunny, J Balvin style."
-    ),
-}
-
 
 def _count_syllables(word):
     return count_syllables(word)
 
 
-def _build_system_prompt(genre=""):
+def _build_system_prompt(genre="", language="clean"):
     return """You are an artist's topline writing partner. Turn the performed hum,
 mumble or gibberish into NEW, singable lyrics that could come out of that mouth.
 A hum is musical material, not a hidden sentence to hallucinate a transcript for.
@@ -124,14 +91,25 @@ WRITING STANDARD:
 
 PERFORMANCE STANDARD:
 - Exactly one lyric line per supplied phrase, in order. A phrase may cross a bar.
-- Match target syllables (within one, or exact for targets of one or two).
+- Continuous phrases may meet with no pause. Carry the thought and delivery
+  across those lines; never insert a breath just because a lyric line ends.
+- Cadence and length boundaries are estimates, not confirmed bar positions.
+- Match target syllables EXACTLY. Never shorten a mumble to make a tidier line,
+  remove repeated articulations, add filler syllables, or stretch fewer words
+  over the missing syllables. Choose different words to fit the existing pocket.
+- Replace the phonetic sounds with real words: keep the ordered consonant/vowel
+  shapes, repeated sounds, stress, pickups and held vowels as close as possible.
+  The phonetic sound is the template, not a sentence to translate. Word divisions
+  can change: several mumble sounds can become one multi-syllable word.
+- The typed theme controls meaning; the vocal controls delivery. If a thought
+  does not fit, change the thought's wording instead of changing the performance.
 - A syllable can span several notes in a run. NEVER assign a word/syllable per note.
 - Respect pickup timing, phrase duration, empty space, accents and held vowels.
 - Prefer the supplied ending vowel when confidence is high; it is a sound target,
   not a demand to repeat an example word. Unknown vowels impose no target.
 - Never move or rewrite locked lines. Keep neighboring lines coherent.
 - Follow hard word/syllable caps. Return only the requested JSON.
-""" + "\n" + GENRE_RULES.get(genre, "")
+""" + "\n" + GENRE_RULES.get(genre, "") + "\n" + CRAFT_STANDARD + ("\n" + language_rule(language) if language is not None else "")
 
 
 def _performance_spec(flow):
@@ -139,18 +117,24 @@ def _performance_spec(flow):
     for i, phrase in enumerate(flow.get("phrase_map", [])):
         slots = phrase.get("syllable_slots", [])
         specs.append({"line": i, "start": phrase.get("start_time"), "end": phrase.get("end_time"),
+            "continuous_from_previous": phrase.get("continuous_from_previous", False),
+            "boundary_source": phrase.get("boundary_source", "unknown"),
+            "boundary_estimated": phrase.get("boundary_estimated", False),
             "target_syllables": phrase.get("target_syllables", phrase.get("syllables", 1)),
+            "syllable_tolerance": 0,
             "max_words": phrase.get("max_words", 12), "max_syllables": phrase.get("max_syllables", 16),
             "sound": phrase.get("phonetic_hint", ""), "ending_vowel": phrase.get("ending_vowel", "unknown"),
             "sound_confidence": phrase.get("listening_confidence", 0),
-            "heard_words": phrase.get("heard_words", ""), "delivery": phrase.get("delivery", ""),
+            "delivery": phrase.get("delivery", ""),
+            "rhyme_tail": phrase.get("rhyme_tail", ""),
+            "rhyme_anchors": phrase.get("rhyme_anchors", []),
             "syllable_source": phrase.get("syllable_source", "acoustic_estimate"),
             "syllable_slots": [{k: s.get(k) for k in ("start_time", "end_time", "accent", "held", "note_count")} for s in slots],
             "notes": [{k: n.get(k) for k in ("start_time", "end_time", "pitch_midi")} for n in phrase.get("note_events", [])[:48]]})
     return specs
 
 
-def _request(prompt, genre):
+def _request(prompt, genre, language="clean"):
     schema = {"type": "object", "properties": {v["name"]: {"type": "string"} for v in STYLE_VARIANTS},
               "required": [v["name"] for v in STYLE_VARIANTS], "additionalProperties": False}
     provider = writer_provider()
@@ -158,8 +142,8 @@ def _request(prompt, genre):
         client = _client(provider)
         if provider == "openai":
             response = client.responses.create(
-                model=os.getenv("OPENAI_GENERATION_MODEL", OPENAI_DEFAULT_MODEL),
-                instructions=_build_system_prompt(genre), input=prompt,
+                model=OPENAI_DEFAULT_MODEL,
+                instructions=_build_system_prompt(genre, language), input=prompt,
                 reasoning={"effort": "low"}, max_output_tokens=4096, store=False,
                 text={"format": {"type": "json_schema", "name": "lyric_versions",
                                  "strict": True, "schema": schema}})
@@ -168,7 +152,7 @@ def _request(prompt, genre):
             text = response.output_text
         else:
             response = client.messages.create(model=GENERATION_MODEL, max_tokens=4096,
-                system=_build_system_prompt(genre), messages=[{"role": "user", "content": prompt}],
+                system=_build_system_prompt(genre, language), messages=[{"role": "user", "content": prompt}],
                 output_config={"format": {"type": "json_schema", "schema": schema}})
             if getattr(response, "stop_reason", None) == "max_tokens":
                 raise GenerationError("The writer ran out of room. Try a shorter section.")
@@ -210,34 +194,66 @@ def _restore_locks(lyrics, locks, count):
     return "\n".join(lines)
 
 
-def _issues(lyrics, phrases, locks):
+def _issues(lyrics, phrases, locks, language="clean"):
     # Artist-kept words are never rewritten by the editor, including for clichés.
-    return [x for x in validate_lyrics(lyrics, phrases) if x["line"] not in locks]
+    issues = [x for x in validate_lyrics(lyrics, phrases) if x["line"] not in locks]
+    if language_mode(language) == 'clean':
+        issues += [dict(line=i,code='explicit_language') for i,line in enumerate(lyrics.splitlines())
+                   if has_profanity(line)]
+    return issues
+
+
+def _pocket_phrases(flow):
+    phrases = []
+    for source in flow.get("phrase_map", []):
+        target = int(source.get("target_syllables", source.get("syllables", 1)))
+        phrase=dict(source, syllable_tolerance=0, max_syllables=target, max_words=target)
+        if phrase.get('sound_source')=='artist_edit':
+            phrase.update(ending_vowel='unknown',rhyme_tail='',rhyme_anchors=[],listening_confidence=0)
+        phrases.append(phrase)
+    return phrases
+
+
+def _counted_lines(lyrics, phrases):
+    """Give the editor measured pronunciation counts instead of blind recounting."""
+    return [{"line": i, "target": phrases[i].get("target_syllables", phrases[i].get("syllables", 1)),
+             "actual_options": sorted(line_syllable_options(line)),
+             "words": [{"word": word, "syllables": sorted(line_syllable_options(word))}
+                       for word in tokens(line)]}
+            for i, line in enumerate(lyrics.splitlines()) if i < len(phrases)]
 
 
 def generate_lyrics(rough_text, flow_data, tone="melodic", mode="verse", vibe="introspective",
-                    gen_mode="cadence", key="auto", genre="", locked_versions=None):
-    phrases = flow_data.get("phrase_map", [])
+                    gen_mode="cadence", key="auto", genre="", locked_versions=None, theme="", language="clean"):
+    language=language_mode(language)
+    phrases = _pocket_phrases(flow_data)
+    flow_data = dict(flow_data, phrase_map=phrases)
     if not phrases:
         raise GenerationError("No vocal phrases were detected. Try a closer, clearer vocal take.")
     locks = {v["name"]: _locks_for(locked_versions, v["name"], len(phrases)) for v in STYLE_VARIANTS}
+    if language=='clean' and any(has_profanity(line) for lock in locks.values() for line in lock.values()):
+        raise GenerationError('Clean mode cannot keep a locked explicit line. Unlock it, use New Versions, or select Explicit.')
     listening = flow_data.get("listening", {})
-    prompt = json.dumps({"task": "Write three finished lyric alternatives to this performance.",
-        "style": {"genre": genre, "tone": tone, "section": mode, "fallback_vibe": vibe, "approach": gen_mode},
+    prompt = json.dumps({"task": "Fit three real-word lyric alternatives to the unchanged performed sounds and pocket.",
+        "theme": str(theme).strip()[:2000],
+        "priority": "Every version must express the typed theme. Match each target count exactly and keep the ordered mouth sounds. Do not infer a story or required wording from gibberish spellings. Internally count the final words before returning each line.",
+        "style": {"genre": genre, "tone": tone, "section": mode, "fallback_vibe": vibe, "approach": gen_mode, "language": language},
+        "rhyme_intent": rhyme_intent(phrases),
         "performed_feel": listening.get("feel", []), "input_type": listening.get("input_type", "unknown"),
-        "source_note": "Cadence follows sounds and emotion, not guessed ASR words. Literal may preserve clearly heard words.",
+        "source_note": "Theme supplies meaning; phonetic sounds supply the exact pocket. Never treat listener-guessed words as a required sentence. Literal may use the optional rough transcript.",
         "rough_transcript": rough_text[:4000] if gen_mode != "cadence" else "",
         "phrases": _performance_spec(flow_data), "alternatives": STYLE_VARIANTS,
         "locked_lines": locks}, ensure_ascii=True)
-    payload = _request(prompt, genre)
+    payload = _request(prompt, genre, language)
     lyrics = {v["name"]: _restore_locks(payload[v["name"]], locks[v["name"]], len(phrases)) for v in STYLE_VARIANTS}
-    problems = {name: _issues(text, phrases, locks[name]) for name, text in lyrics.items()}
+    problems = {name: _issues(text, phrases, locks[name], language) for name, text in lyrics.items()}
     repair_error = False
     if any(problems.values()):
-        repair = json.dumps({"task": "Edit only failed lines. Keep every unflagged and locked line exactly. Fix line count when required.",
-            "original_request": json.loads(prompt), "lyrics": lyrics, "failures": problems})
+        repair = json.dumps({"task": "Edit only failed lines. Keep every unflagged and locked line exactly. Fix line count when required. The pronunciation counts below are the checker results. Replace wording so the total equals the exact target; do not shorten the performed pocket. Check the sum of the replacement words before returning. Keep the theme and sound pattern.",
+            "original_request": json.loads(prompt), "lyrics": lyrics, "failures": problems,
+            "counted_lines": {name: _counted_lines(text, phrases) for name, text in lyrics.items() if problems[name]}})
         try:
-            fixed = _request(repair, genre)
+            fixed = _request(repair, genre, language)
             for name in lyrics:
                 if not problems[name]:
                     continue
@@ -247,16 +263,16 @@ def generate_lyrics(rough_text, flow_data, tone="melodic", mode="verse", vibe="i
                 if len(old) == len(new) == len(phrases):
                     failed = {x["line"] for x in problems[name] if x["line"] is not None}
                     candidate = "\n".join(new[i] if i in failed and i not in locks[name] else old[i] for i in range(len(old)))
-                if len(_issues(candidate, phrases, locks[name])) < len(problems[name]):
+                if len(_issues(candidate, phrases, locks[name], language)) < len(problems[name]):
                     lyrics[name] = candidate
         except Exception:
             repair_error = True
     results = []
     for variant in STYLE_VARIANTS:
         name = variant["name"]
-        issues = _issues(lyrics[name], phrases, locks[name])
+        issues = _issues(lyrics[name], phrases, locks[name], language)
         # A structural failure cannot be mapped to the vocal. Never show it synced.
-        if any(x["code"] == "line_count" for x in issues):
+        if any(x["code"] in {"line_count", "explicit_language"} for x in issues):
             continue
         score, breakdown = _score_lyrics(lyrics[name], flow_data)
         results.append({"name": name, "label": variant["label"], "lyrics": lyrics[name],
@@ -264,30 +280,37 @@ def generate_lyrics(rough_text, flow_data, tone="melodic", mode="verse", vibe="i
                         "quality_status": "needs_review" if issues else "checked",
                         "repair_unavailable": repair_error})
     if not results:
-        raise GenerationError("The writer could not match the phrase count. Try generating again.")
+        raise GenerationError("The writer could not meet the phrase and language settings. Try generating again.")
     results.sort(key=lambda r: (r["quality_status"] == "checked", r["score"]), reverse=True)
     return results
 
 
 def generate_single_line(bar_index, syllable_count, context_lines, locked_lines, rough_text,
-                         flow_data, tone, mode, vibe, gen_mode, key, genre=""):
+                         flow_data, tone, mode, vibe, gen_mode, key, genre="", theme="", language="clean"):
+    language=language_mode(language)
     if not 0 <= bar_index < len(context_lines):
         raise ValueError("Line index is out of range")
     if str(bar_index) in locked_lines or bar_index in locked_lines:
-        return locked_lines.get(str(bar_index), locked_lines.get(bar_index))
-    phrases = flow_data.get("phrase_map", [])
+        line=locked_lines.get(str(bar_index), locked_lines.get(bar_index))
+        if language=='clean' and has_profanity(line):
+            raise GenerationError('Unlock the explicit line before rewriting in Clean mode.')
+        return line
+    phrases = _pocket_phrases(flow_data)
     phrase = phrases[bar_index] if bar_index < len(phrases) else {"syllables": syllable_count, "max_words": syllable_count}
     prompt = json.dumps({"task": "Rewrite ONLY the selected line. Return the same new line in all three JSON fields.",
+                        "theme": str(theme).strip()[:2000],
                         "line": bar_index, "context": context_lines, "locked_lines": locked_lines,
-                        "style": {"genre": genre, "tone": tone, "vibe": vibe, "mode": mode},
+                        "style": {"genre": genre, "tone": tone, "vibe": vibe, "mode": mode, "language": language},
+                        "rhyme_intent": rhyme_intent(phrases),
                         "performed_feel": flow_data.get("listening", {}).get("feel", []),
                         "phrase": _performance_spec({"phrase_map": [phrase]})[0]})
     for attempt in range(2):
-        candidate = clean_lyrics(_request(prompt, genre)["melodic"])
-        issues = validate_lyrics(candidate, [phrase])
+        candidate = clean_lyrics(_request(prompt, genre, language)["melodic"])
+        issues = _issues(candidate, [phrase], {}, language)
         if not issues:
             return candidate
-        prompt += "\nRepair this candidate: " + json.dumps({"candidate": candidate, "issues": issues})
+        prompt += "\nRepair this candidate to the EXACT target using the counted words: " + json.dumps(
+            {"candidate": candidate, "issues": issues, "counted_lines": _counted_lines(candidate, [phrase])})
     raise GenerationError("That rewrite didn't fit the take. Your previous line was kept; try again.")
 
 
@@ -309,8 +332,16 @@ def _score_lyrics(lyrics, flow_data):
         vowels.append(float(vowel in ending_vowels(lines[i])) if vowel != "unknown" else .5)
         density.append(max(0., 1-delta/max(target, 2)))
     mean = lambda x: sum(x)/len(x) if x else .5
-    last = [tokens(l)[-1] for l in lines if tokens(l)]
-    rhyme = mean([rhyme_match(a,b) for a,b in zip(last,last[1:])]) if len(last)>1 else .5
+    # Reward only relationships suggested by the take, including non-adjacent
+    # lines. Unknown intent is neutral rather than a preference for couplets.
+    last = [tokens(line)[-1] if tokens(line) else '' for line in lines]
+    rhyme_pairs=[]
+    for group in rhyme_intent(phrases)['end_groups']:
+        for a,b in zip(group['lines'],group['lines'][1:]):
+            if b<len(last) and last[a] and last[b]:
+                rhyme_pairs.append(max(rhyme_match(last[a],last[b]),
+                    .65 if ending_vowels(lines[a]) & ending_vowels(lines[b]) else 0))
+    rhyme = mean(rhyme_pairs)
     issues = validate_lyrics(lyrics, phrases) if phrases else []
     craft = max(0., 1-.4*sum(x["code"] in {"cliche","non_lyric_text"} for x in issues))
     breakdown = {"syllable_fit": mean(fits), "word_count_fit": mean(words), "stress_fit": mean(stress),

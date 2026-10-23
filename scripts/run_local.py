@@ -26,6 +26,9 @@ def open_studio(url):
     for _ in range(120):
         if ready(url):
             destination = url if os.getenv("OPENAI_API_KEY") else url + "/settings"
+            page = os.getenv("LYRIC_GOAT_OPEN_PATH")
+            if page in {"/compare", "/settings", "/"}:
+                destination = url + page
             if sys.platform == "darwin":
                 subprocess.run(["open", "-a", "Safari", destination], check=False)
             else:
@@ -60,15 +63,19 @@ def main():
             raise SystemExit("Another Lyric Goat instance is starting. Try again shortly.")
         # Identify port collisions without opening an unrelated local application.
         with socket.socket() as probe:
+            # Match the server socket so a recent stop does not look like a port collision.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 probe.bind(("127.0.0.1", port))
             except OSError:
                 raise SystemExit(f"Port {port} is in use. Close the other app or change LYRIC_GOAT_PORT in .env.")
         from app import app
+        from services.cloud_storage import bootstrap
         from waitress import serve
         print(f"Lyric Goat: {url}\nLeave this Terminal window open. Press Control-C to stop.\n"
               "Close it before reopening the Desktop launcher to load updates.", flush=True)
         Thread(target=open_studio, args=(url,), daemon=True).start()
+        Thread(target=bootstrap, daemon=True).start()
         serve(app, host="127.0.0.1", port=port, threads=4,
               max_request_body_size=50 * 1024 * 1024, channel_timeout=300)
 

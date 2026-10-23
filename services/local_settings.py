@@ -9,7 +9,6 @@ from flask import Blueprint, abort, current_app, redirect, render_template, requ
 
 settings = Blueprint("local_settings", __name__)
 _save_lock = Lock()
-MODELS = {"gpt-6-luna": "Budget writing", "gpt-5.4-mini": "Alternative writing"}
 
 
 def enabled():
@@ -30,18 +29,28 @@ def configure():
         if origin and origin != request.host_url.rstrip("/"):
             abort(403)
         key = request.form.get("api_key", "").strip()
-        model = request.form.get("model", "gpt-6-luna")
-        if model not in MODELS:
-            error = "Choose one of the available writing models."
+        action = request.form.get("action", "openai")
+        values = {}
+        if action == "gemini":
+            google_key = request.form.get("gemini_key", "").strip()
+            if google_key and (not 20 <= len(google_key) <= 512 or any(c.isspace() for c in google_key)):
+                error = "Enter a valid Google Gemini API key."
+            elif not google_key and not os.getenv("GEMINI_API_KEY"):
+                error = "Add your Google Gemini key to enable its comparison option."
+            elif google_key:
+                values["GEMINI_API_KEY"] = google_key
+        elif action != "openai":
+            error = "Choose a supported settings form."
         elif key and (not key.startswith("sk-") or len(key) < 20 or len(key) > 512 or any(c.isspace() for c in key)):
             error = "Enter a valid OpenAI secret key."
         elif not key and not os.getenv("OPENAI_API_KEY"):
             error = "Add your OpenAI key to continue."
         else:
-            env_path = Path(current_app.config.get("LOCAL_ENV_FILE", Path(current_app.root_path) / ".env"))
-            values = {"LYRIC_GOAT_WRITER": "openai", "OPENAI_GENERATION_MODEL": model}
+            values = {"LYRIC_GOAT_WRITER": "openai", "OPENAI_GENERATION_MODEL": "gpt-6-luna"}
             if key:
                 values["OPENAI_API_KEY"] = key
+        if error is None:
+            env_path = Path(current_app.config.get("LOCAL_ENV_FILE", Path(current_app.root_path) / ".env"))
             try:
                 with _save_lock:
                     fd = os.open(env_path, os.O_CREAT | os.O_WRONLY, 0o600)
@@ -55,9 +64,9 @@ def configure():
                 error = "Could not save settings. Check that the app folder is writable."
             else:
                 return redirect(url_for("local_settings.configure", saved="1"), code=303)
-    response = current_app.make_response(render_template("settings.html", models=MODELS,
-        model=os.getenv("OPENAI_GENERATION_MODEL", "gpt-6-luna"),
+    response = current_app.make_response(render_template("settings.html",
         key_present=bool(os.getenv("OPENAI_API_KEY")), csrf=session["setup_csrf"],
+        gemini_present=bool(os.getenv("GEMINI_API_KEY")),
         error=error, saved=request.args.get("saved") == "1"))
     response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"

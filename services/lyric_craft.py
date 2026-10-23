@@ -100,7 +100,7 @@ def validate_lyrics(lyrics, phrases):
             break
         phrase = phrases[i]
         target = int(phrase.get("target_syllables", phrase.get("syllables", 1)))
-        tolerance = 0 if target <= 2 else 1
+        tolerance = phrase.get("syllable_tolerance", 0 if target <= 2 else 1)
         if min(abs(n - target) for n in line_syllable_options(line)) > tolerance:
             issues.append({"line": i, "code": "syllable_fit", "target": target})
         if len(tokens(line)) > int(phrase.get("max_words", target)):

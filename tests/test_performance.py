@@ -17,7 +17,58 @@ def vocal(duration=2, pulses=0, run=False):
     return carrier * envelope
 
 
+def connected_vocal(intervals):
+    """Articulations over an unbroken voiced floor: no silence to segment on."""
+    centers = .3 + np.r_[0., np.cumsum(intervals)]
+    t = np.arange(round((centers[-1] + .3) * SR)) / SR
+    envelope = np.full_like(t, .055)
+    for center in centers:
+        envelope += .18 * np.exp(-.5 * ((t - center) / .045) ** 2)
+    envelope *= np.minimum(1, t / .04) * np.minimum(1, (t[-1] - t) / .04)
+    return np.sin(2 * np.pi * 220 * t) * envelope, centers
+
+
 class PerformanceTests(unittest.TestCase):
+    def test_continuous_flow_switch_splits_before_the_sixteen_syllable_cap(self):
+        for before, after in [(.4, .18), (.18, .4)]:
+            with self.subTest(before=before):
+                y, centers = connected_vocal([before] * 5 + [(before + after) / 2] + [after] * 5)
+                phrases = vocal_phrases(y, SR)
+                changes = [p for p in phrases if p.get("boundary_source") == "cadence_change"]
+                self.assertEqual(len(changes), 1)
+                self.assertAlmostEqual(changes[0]["start_time"], (centers[5] + centers[6]) / 2, delta=.08)
+                self.assertEqual(sum(p["target_syllables"] for p in phrases), 12)
+                self.assertTrue(changes[0]["continuous_from_previous"])
+                for left, right in zip(phrases, phrases[1:]):
+                    self.assertEqual(left["end_time"], right["start_time"])
+
+    def test_long_steady_mumble_gets_shorter_lines_without_waiting_for_silence(self):
+        y, _ = connected_vocal([.4] * 13)
+        phrases = vocal_phrases(y, SR, tempo=90)
+        self.assertGreater(len(phrases), 1)
+        self.assertEqual(sum(p["target_syllables"] for p in phrases), 14)
+        self.assertTrue(all(p["end_time"] - p["start_time"] <= 3.34 for p in phrases))
+        self.assertTrue(any(p.get("boundary_source") == "phrase_length" for p in phrases))
+
+    def test_isolated_quick_syllable_does_not_become_a_flow_switch(self):
+        y, _ = connected_vocal([.25] * 4 + [.17] + [.25] * 4)
+        phrases = vocal_phrases(y, SR)
+        self.assertFalse(any(p.get("boundary_source") == "cadence_change" for p in phrases))
+        self.assertEqual(sum(p["target_syllables"] for p in phrases), 10)
+
+    def test_long_held_run_is_not_cut_into_fake_bars(self):
+        phrases = vocal_phrases(vocal(duration=7, run=True), SR)
+        self.assertEqual(len(phrases), 1)
+        self.assertEqual(phrases[0]["target_syllables"], 1)
+
+    def test_straight_to_swung_flow_can_change_without_changing_average_speed(self):
+        y, centers = connected_vocal([.3] * 6 + [.18, .42] * 4)
+        phrases = vocal_phrases(y, SR)
+        changes = [p for p in phrases if p.get("boundary_source") == "cadence_change"]
+        self.assertEqual(len(changes), 1)
+        self.assertAlmostEqual(changes[0]["start_time"], centers[6], delta=.2)
+        self.assertEqual(sum(p["target_syllables"] for p in phrases), 15)
+
     def test_one_held_syllable_can_span_many_notes(self):
         y = vocal(run=True)
         phrases = vocal_phrases(y, SR)

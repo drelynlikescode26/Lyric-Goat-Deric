@@ -15,6 +15,7 @@ import time
 import uuid
 import shutil
 import tempfile
+from services import cloud_storage
 from pathlib import Path
 
 DATA_DIR  = Path(os.getenv("LYRIC_GOAT_DATA_DIR", "data"))
@@ -51,6 +52,7 @@ def _atomic_write(path: Path, data: dict) -> None:
         os.fsync(tmp.fileno())
         tmp.close()
         os.replace(tmp.name, path)
+        cloud_storage.queue_file(path, "songs/" + path.name)
     except Exception:
         tmp.close()
         if os.path.exists(tmp.name):
@@ -60,6 +62,8 @@ def _atomic_write(path: Path, data: dict) -> None:
 
 def _load(song_id: str) -> dict | None:
     path = _song_path(song_id)
+    if not path.exists():
+        cloud_storage.ensure_file(path, "songs/" + path.name)
     if not path.exists():
         return None
     try:
@@ -134,6 +138,7 @@ def delete_song(song_id: str) -> bool:
         _delete_section_audio(section)
     path = _song_path(song_id)
     if path.exists():
+        cloud_storage.deleted("songs/" + path.name)
         path.unlink()
     return True
 
@@ -231,9 +236,17 @@ def save_section_audio(song_id: str, section_id: str, src_path: str, ext: str) -
     if song is None:
         return None
     ext = (ext or "webm").lstrip(".")
-    filename = f"{song_id}_{section_id}.{ext}"
+    if not any(s["id"] == section_id for s in song.get("sections", [])):
+        return None
+    if ext not in {"wav", "mp3", "m4a", "webm", "ogg", "mp4", "flac"}:
+        raise ValueError("Use a supported audio format.")
+    # Immutable audio names keep older cloud lyric revisions linked to the right take.
+    fingerprint = cloud_storage.digest_file(src_path)[:16]
+    filename = f"{song_id}_{section_id}_{fingerprint}.{ext}"
     dest = AUDIO_DIR / filename
     shutil.copyfile(src_path, dest)
+    dest.chmod(0o600)
+    cloud_storage.queue_file(dest, "audio/" + filename)
     update_section(song_id, section_id, {"audio_file": filename})
     return filename
 
@@ -241,14 +254,17 @@ def save_section_audio(song_id: str, section_id: str, src_path: str, ext: str) -
 def audio_path(filename: str) -> Path | None:
     if not filename:
         return None
+    if Path(filename).name != filename:
+        return None
     p = AUDIO_DIR / filename
-    return p if p.exists() else None
+    return cloud_storage.ensure_file(p, "audio/" + filename)
 
 
 def _delete_section_audio(section: dict) -> None:
     fn = section.get("audio_file")
     if fn:
         p = AUDIO_DIR / fn
+        cloud_storage.deleted("audio/" + fn)
         if p.exists():
             p.unlink(missing_ok=True)
 

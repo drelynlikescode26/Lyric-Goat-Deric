@@ -1,0 +1,37 @@
+.compare-app { max-width: 1240px; }
+.compare-app h1 { font-size: clamp(1.6rem, 4vw, 2.5rem); margin: 14px 0; }
+.compare-app h2 { font-size: 1.15rem; }
+.compare-app h3 { font-size: 1rem; }
+.compare-app a { color: #c4b5fd; }
+.compare-app nav { margin-top: 18px; }
+.compare-intake, .compare-controls { display: grid; gap: 16px; line-height: 1.6; }
+.compare-intake form { display: grid; grid-template-columns: 1fr; gap: 9px; }
+.compare-app input:not([type=checkbox]), .compare-app select, .compare-app textarea { width: 100%; padding: 11px; color: var(--text); background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+.compare-app input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); flex-shrink: 0; }
+.compare-app fieldset { padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.compare-app legend { padding: 0 8px; }
+.compare-provider { display: flex; align-items: start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.compare-provider:last-child { border: 0; }
+.compare-provider small { display: block; color: #b4b4c7; }
+.compare-provider input { margin-top: 5px; }
+.compare-primary { background: var(--accent); justify-self: start; }
+.compare-app audio { width: 100%; }
+.compare-app .muted { color: #b4b4c7; font-size: .85rem; }
+.compare-run { margin: 14px 0 30px; }
+.compare-run > h2 { margin: 15px 0 6px; }
+.compare-run > p { margin-bottom: 16px; }
+.compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 16px; align-items: start; }
+.listener-card { min-width: 0; display: grid; gap: 14px; padding: 20px; line-height: 1.55; }
+.listener-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.listener-card .phrases { display: grid; gap: 12px; }
+.listener-phrase { padding: 14px; background: var(--surface2); border-radius: 8px; display: grid; gap: 7px; }
+.listener-phrase .ws-btn { justify-self: start; }
+.listener-card form { display: grid; gap: 9px; border-top: 1px solid var(--border); padding-top: 14px; }
+.listener-card label { display: grid; gap: 5px; }
+.listener-card .check-label { display: flex; align-items: center; gap: 8px; }
+.listener-card textarea { min-height: 85px; resize: vertical; }
+.compare-app [hidden] { display: none !important; }
+.compare-app button:disabled { opacity: .5; cursor: not-allowed; }
+.compare-error { color: #fca5a5; }
+.compare-preferred { border-color: #8b5cf6; }
+.compare-app :focus-visible { outline: 3px solid var(--accent2); outline-offset: 3px; }

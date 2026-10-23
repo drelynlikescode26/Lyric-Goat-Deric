@@ -5,8 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lyric Goat — Mumble to Lyrics</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/studio.css" />
+  <link rel="stylesheet" href="/static/studio-mac.css" />
+  <link rel="stylesheet" href="/static/storage.css" />
+  <script src="/static/storage.js" defer></script>
   <link rel="manifest" href="/static/manifest.json" />
-  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="theme-color" content="#10120f" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -16,20 +20,16 @@
 <body>
   <div class="app">
 
-    <!-- Header -->
-    <header class="header">
-      <div class="logo">🐐 LYRIC GOAT</div>
-      <p class="tagline">Mumble → Lyrics. Your flow. Your words.</p>
-      {% if local_setup %}<p class="tagline"><a href="/settings">OpenAI settings</a></p>{% endif %}
-    </header>
-
+<header class="lg-topbar"><a class="lg-brand" href="/"><svg class="lg-mark" viewBox="0 0 36 36" aria-hidden="true"><path d="M8 6 5 13l7 5-2 12 8-4 8 4-2-12 7-5-3-7-5 8H13Z" fill="currentColor"/><path d="m14 19 4 3 4-3" fill="none" stroke="#11150f" stroke-width="2"/></svg> LYRIC GOAT</a><nav class="lg-toplinks" aria-label="Studio links">{% if local_setup %}<a href="/lyrics">Lyric Desk</a><a href="/compare">Listener lab</a><a href="/storage" id="storageBadge" class="storage-top-status" data-state="local">Mac storage</a><a href="/settings">Settings</a>{% endif %}<button id="motionToggle" class="lg-motion" type="button" aria-pressed="false">Pause motion</button></nav></header>
+    <section class="lg-hero"><div class="lg-hero-copy"><p class="lg-eyebrow"><span></span> YOUR PERSONAL LYRIC STUDIO</p><h1>Your flow.<br><em>Find its words.</em></h1><p class="lg-intro">Start with a feeling. Mumble the pocket.<br>Turn your sounds into lyrics that stay yours.</p><div class="lg-hero-actions"><a class="lg-cta" href="#capture">Start a take <span>↗</span></a><a class="lg-link" href="/lyrics">Revise existing lyrics ↗</a></div></div><div class="lg-art" aria-hidden="true"><div class="lg-orbit orbit-one"></div><div class="lg-orbit orbit-two"></div><span class="lg-art-label">RAW FEELING / REAL WORDS</span><div class="lg-wave"><i style="--h:12%;--d:-0.0s"></i><i style="--h:23%;--d:-0.13s"></i><i style="--h:38%;--d:-0.26s"></i><i style="--h:21%;--d:-0.39s"></i><i style="--h:48%;--d:-0.52s"></i><i style="--h:65%;--d:-0.65s"></i><i style="--h:43%;--d:-0.78s"></i><i style="--h:78%;--d:-0.91s"></i><i style="--h:56%;--d:-1.04s"></i><i style="--h:88%;--d:-1.17s"></i><i style="--h:66%;--d:-1.3s"></i><i style="--h:100%;--d:-1.4300000000000002s"></i><i style="--h:73%;--d:-1.56s"></i><i style="--h:54%;--d:-1.69s"></i><i style="--h:86%;--d:-1.82s"></i><i style="--h:61%;--d:-1.9500000000000002s"></i><i style="--h:94%;--d:-2.08s"></i><i style="--h:72%;--d:-2.21s"></i><i style="--h:48%;--d:-2.34s"></i><i style="--h:67%;--d:-2.47s"></i><i style="--h:36%;--d:-2.6s"></i><i style="--h:51%;--d:-2.73s"></i><i style="--h:27%;--d:-2.8600000000000003s"></i><i style="--h:16%;--d:-2.99s"></i><i style="--h:30%;--d:-3.12s"></i></div><span class="lg-art-caption"><b>KEEP THE POCKET.</b><span>FIND THE LANGUAGE.</span></span><span class="lg-spark spark-one">✳</span><span class="lg-spark spark-two">+</span></div></section>
+    <nav class="lg-process" aria-label="Writing workflow"><a href="#capture" id="stepCapture" class="current"><b>01</b><span>Catch the flow<small>Record or upload</small></span></a><a href="#style" id="stepStyle"><b>02</b><span>Set the direction<small>Genre, feeling, story</small></span></a><a href="#generateBtn" id="stepLyrics"><b>03</b><span>Make it yours<small>Listen, edit, refine</small></span></a></nav>
     <!-- Song Workspace -->
     <section class="workspace-bar" id="workspaceBar">
       <div class="workspace-song-row">
         <div class="workspace-song-picker">
-          <span class="workspace-icon">🎵</span>
+          <span class="workspace-icon">≋</span>
           <button class="song-select-btn" id="songSelectBtn" type="button">
-            <span id="currentSongTitle">No song selected</span>
+            <span id="currentSongTitle">Your saved songs</span>
             <span class="song-select-arrow">▾</span>
           </button>
           <div class="song-dropdown hidden" id="songDropdown"></div>
@@ -47,75 +47,15 @@
       </div>
     </section>
 
-    <!-- Tips Section -->
-    <section class="tips-section">
-      <button class="tips-toggle" id="tipsToggle">
-        <span>How to get the best output</span>
-        <span class="tips-arrow" id="tipsArrow">▼</span>
-      </button>
-      <div class="tips-body hidden" id="tipsBody">
-
-        <div class="tips-grid">
-
-          <div class="tip-card">
-            <div class="tip-icon">🎙</div>
-            <div class="tip-title">Recording setup</div>
-            <div class="tip-text">Use headphones or find a quiet room. Get close to your mic — 6 to 12 inches. Background noise confuses the transcription and kills syllable accuracy.</div>
-          </div>
-
-          <div class="tip-card">
-            <div class="tip-icon">🎵</div>
-            <div class="tip-title">How to mumble</div>
-            <div class="tip-text">Mumble WITH rhythm, not just words. The flow and cadence matter more than pronouncing words clearly. Natural pauses between phrases = natural bar breaks. Think in bars, not sentences.</div>
-          </div>
-
-          <div class="tip-card">
-            <div class="tip-icon">📏</div>
-            <div class="tip-title">Length &amp; structure</div>
-            <div class="tip-text">4–16 bars works best. Mumble one idea per session — don't try to cram a whole song. Each pause you take becomes a new bar. Short, punchy phrases give tighter results than long run-ons.</div>
-          </div>
-
-          <div class="tip-card">
-            <div class="tip-icon">🎛</div>
-            <div class="tip-title">Style controls</div>
-            <div class="tip-text">These directly change how the AI writes. <strong>Tone</strong> = how it hits. <strong>Mode</strong> = what it is (verse, hook, story). <strong>Vibe</strong> = the emotion behind it. Match all three to your idea before you generate.</div>
-          </div>
-
-          <div class="tip-card">
-            <div class="tip-icon">🔁</div>
-            <div class="tip-title">Iterate</div>
-            <div class="tip-text">First result not perfect? Don't re-record — just switch up the style controls and hit Generate again on the same audio. Try Melodic vs Rap vs Punchy and pick what fits.</div>
-          </div>
-
-          <div class="tip-card">
-            <div class="tip-icon">✅</div>
-            <div class="tip-title">Check the bars</div>
-            <div class="tip-text">Look at the Raw Transcription section after generating. It shows each bar with its syllable count. If a bar looks wrong (too many syllables or split badly), re-record that phrase more clearly.</div>
-          </div>
-
-        </div>
-
-        <div class="tips-quick">
-          <span class="tips-quick-label">QUICK COMBOS THAT WORK</span>
-          <div class="tips-combos">
-            <span class="combo-chip">Hook + Melodic + Sad = emotional chorus</span>
-            <span class="combo-chip">Verse + Aggressive + Hype = rap verse</span>
-            <span class="combo-chip">Hook + Simple + Love = singable R&amp;B hook</span>
-            <span class="combo-chip">Story + Punchlines + Introspective = deep verse</span>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
+    <div class="studio-workbench">
     <!-- Input Section -->
-    <section class="card input-section">
-      <h2 class="section-title">1. Drop Your Mumble</h2>
+    <section class="card input-section" id="capture">
+      <div class="lg-section-head"><span class="lg-step">01</span><h2 class="lg-panel-title">Catch the flow.</h2></div><p class="capture-note">No perfect words needed. Just your pocket.</p>
 
       <!-- Mic Recording -->
       <div class="record-zone">
         <button id="recordBtn" class="btn btn-record" type="button">
-          <span class="mic-icon">🎙</span>
+          <span class="mic-icon" aria-hidden="true">●</span>
           <span id="recordLabel">Start Recording</span>
         </button>
         <div id="recordingStatus" class="recording-status hidden">
@@ -126,7 +66,7 @@
       </div>
 
       <!-- Metronome -->
-      <div class="metronome-zone">
+      <details class="studio-details"><summary>Tempo &amp; key <span>Optional</span></summary><div class="metronome-zone">
         <div class="metronome-header">
           <span class="metronome-label">METRONOME</span>
           <span class="metronome-hint">Tap along while recording</span>
@@ -193,29 +133,25 @@
         </div>
       </div>
 
-      <div class="divider"><span>or</span></div>
+      </details>
+      <div class="divider"><span>or bring your own take</span></div>
 
       <!-- File Upload -->
       <label class="upload-label" for="fileInput">
-        <span class="upload-icon">📁</span>
+        <span class="upload-icon" aria-hidden="true">↥</span>
         <span id="uploadText">Upload Audio File</span>
         <input type="file" id="fileInput" accept="audio/*" hidden />
       </label>
     </section>
 
     <!-- Style Controls -->
-    <section class="card controls-section">
-      <h2 class="section-title">2. Set Your Style</h2>
+    <section class="card controls-section" id="style">
+      <div class="lg-section-head"><span class="lg-step">02</span><h2 class="lg-panel-title">Set the direction.</h2></div>
 
-      <!-- Hum Mode Toggle -->
-      <div class="hum-mode-row">
-        <div class="hum-mode-info">
-          <span class="hum-mode-title">MELODY FIRST</span>
-          <span class="hum-mode-desc">Hum, mumble or sing. Phrasing is automatic. Turn off to also transcribe spoken words.</span>
-        </div>
-        <button class="hum-mode-toggle active" id="humModeToggle" type="button">
-          <span class="hum-mode-status">ON</span>
-        </button>
+      <div class="control-group theme-group">
+        <label class="control-label" for="themeInput">WHAT'S THE SONG ABOUT?</label>
+        <textarea id="themeInput" class="modal-input" rows="3" maxlength="2000" placeholder="Your theme, story or feeling. E.g. missing someone but choosing not to call them back."></textarea>
+        <p class="control-hint">Your theme gives the words meaning. Detailed listening keeps your mumble sounds and pocket.</p>
       </div>
 
       <div class="controls-grid">
@@ -223,7 +159,7 @@
         <div class="control-group">
           <label class="control-label">GENRE</label>
           <div class="pill-group" data-group="genre">
-            <button class="pill active" data-value="hiphop">Hip-Hop</button>
+            <button class="pill" data-value="hiphop">Hip-Hop</button>
             <button class="pill" data-value="trap">Trap</button>
             <button class="pill" data-value="rnb">R&amp;B</button>
             <button class="pill" data-value="pop">Pop</button>
@@ -234,6 +170,27 @@
         </div>
 
         <div class="control-group">
+          <label class="control-label">LYRIC LANGUAGE</label>
+          <div class="pill-group" data-group="language">
+            <button class="pill active" data-value="clean">Clean</button>
+            <button class="pill" data-value="explicit">Explicit allowed</button>
+          </div>
+          <p class="control-hint">Clean is the default. Explicit language is used only when you select it.</p>
+        </div>
+
+      </div>
+      <details class="studio-details advanced-style"><summary>Fine-tune your style <span>Optional</span></summary>      <!-- Hum Mode Toggle -->
+      <div class="hum-mode-row">
+        <div class="hum-mode-info">
+          <span class="hum-mode-title">MELODY FIRST</span>
+          <span class="hum-mode-desc">Hum, mumble or sing. Phrasing is automatic. Turn off to also transcribe spoken words.</span>
+        </div>
+        <button class="hum-mode-toggle active" id="humModeToggle" type="button">
+          <span class="hum-mode-status">ON</span>
+        </button>
+      </div>
+
+<div class="controls-grid">        <div class="control-group">
           <label class="control-label">APPROACH <span class="control-hint">how the AI reads your mumble</span></label>
           <div class="pill-group" data-group="gen_mode">
             <button class="pill active" data-value="cadence">Follow my sounds &amp; melody</button>
@@ -272,21 +229,85 @@
         </div>
 
       </div>
+      </details>
     </section>
+    </div>
 
+    <p id="studioStatus" class="studio-status" role="status">Start with a recording or audio file, then choose a genre.</p>
     <!-- Generate Button -->
     <button id="generateBtn" class="btn btn-generate" disabled>
       <span id="generateLabel">Generate Lyrics</span>
       <span id="generateSpinner" class="spinner hidden"></span>
     </button>
 
+    <!-- Tips Section -->
+    <section class="tips-section">
+      <button class="tips-toggle" id="tipsToggle">
+        <span>How to get the best output</span>
+        <span class="tips-arrow" id="tipsArrow">▼</span>
+      </button>
+      <div class="tips-body hidden" id="tipsBody">
+
+        <div class="tips-grid">
+
+          <div class="tip-card">
+            <div class="tip-icon">🎙</div>
+            <div class="tip-title">Recording setup</div>
+            <div class="tip-text">Use headphones or find a quiet room. Get close to your mic — 6 to 12 inches. Background noise confuses the transcription and kills syllable accuracy.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">🎵</div>
+            <div class="tip-title">How to mumble</div>
+            <div class="tip-text">Mumble with your natural rhythm. You can move between flows without pausing. The app estimates phrase breaks from articulations, rhythm changes, and phrase length.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">📏</div>
+            <div class="tip-title">Length &amp; structure</div>
+            <div class="tip-text">Start with a 10–30 second section. Pauses can help locate phrases, but phrases can continue without a breath. Automatic breaks are estimates, not confirmed musical bars.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">🎛</div>
+            <div class="tip-title">Style controls</div>
+            <div class="tip-text">These directly change how the AI writes. <strong>Tone</strong> = how it hits. <strong>Mode</strong> = what it is (verse, hook, story). <strong>Vibe</strong> = the emotion behind it. Match all three to your idea before you generate.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">🔁</div>
+            <div class="tip-title">Iterate</div>
+            <div class="tip-text">First result not perfect? Don't re-record — just switch up the style controls and hit Generate again on the same audio. Try Melodic vs Rap vs Punchy and pick what fits.</div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-icon">✅</div>
+            <div class="tip-title">Check the bars</div>
+            <div class="tip-text">Look at the Raw Transcription section after generating. It shows each bar with its syllable count. If a bar looks wrong (too many syllables or split badly), re-record that phrase more clearly.</div>
+          </div>
+
+        </div>
+
+        <div class="tips-quick">
+          <span class="tips-quick-label">QUICK COMBOS THAT WORK</span>
+          <div class="tips-combos">
+            <span class="combo-chip">Hook + Melodic + Sad = emotional chorus</span>
+            <span class="combo-chip">Verse + Aggressive + Hype = rap verse</span>
+            <span class="combo-chip">Hook + Simple + Love = singable R&amp;B hook</span>
+            <span class="combo-chip">Story + Punchlines + Introspective = deep verse</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
     <!-- Results -->
-    <section id="resultsSection" class="hidden">
+    <section id="resultsSection" class="hidden lg-enter">
 
       <!-- Results action bar -->
       <div class="results-actions">
         <div class="results-actions-left">
-          <span class="results-label">RESULTS</span>
+          <span class="lg-step">03</span><h2 class="lg-panel-title">Make it yours.</h2>
         </div>
         <div class="results-actions-right">
           <button class="btn results-action-btn" id="regenerateAllBtn" title="Generate from the reviewed syllable slots without transcribing again">
@@ -299,14 +320,20 @@
       </div>
 
       <!-- Rough Text + Phrase Timeline -->
-      <div class="card rough-card">
+      <details class="card rough-card" id="soundEditor">
+        <summary>Review or edit the gibberish</summary>
+        {% if local_setup %}<button class="ws-btn" id="compareTakeBtn" type="button">Compare this take</button>{% endif %}
+        <p class="sound-editor-help">Correct the sounds you performed. If you add or remove a syllable, adjust the count too. Then update the lyrics; untouched lines stay in place.</p>
         <div class="rough-header">
-          <span class="rough-badge">RAW TRANSCRIPTION</span>
+          <span class="rough-badge">YOUR MUMBLE SOUNDS</span>
           <span class="rough-badge melody-badge hidden" id="melodyBadge">MELODY MODE</span>
           <span class="rough-badge detected-badge hidden" id="repetitiveBadge">REPETITIVE — cadence used</span>
         </div>
         <div id="analysisChips" class="analysis-chips"></div>
         <div id="roughText" class="rough-text"></div>
+        <button class="ws-btn" id="applySoundEditsBtn" type="button" disabled>Update lyrics from edits</button>
+        <button class="ws-btn ws-btn-ghost" id="undoSoundEditsBtn" type="button" disabled>Undo sound edits</button>
+        <p id="soundEditStatus" role="status" aria-live="polite"></p>
 
         <!-- Phrase timeline -->
         <div class="timeline-wrap" id="timelineWrap">
@@ -319,9 +346,11 @@
         </div>
 
         <div class="flow-stats" id="flowStats"></div>
-      </div>
+      </details>
 
       <!-- Lyric Versions -->
+      <label class="control-label" for="studioVersion">LYRIC ALTERNATIVE</label>
+      <select id="studioVersion" class="modal-input"></select>
       <div id="versionsContainer" class="versions-grid"></div>
 
       <!-- Debug / Audit Panel -->
@@ -368,6 +397,7 @@
 
     </section>
 
+    <footer class="lg-footer"><span>YOUR POCKET. YOUR STORY. YOUR WORDS.</span><span>LYRIC GOAT / PERSONAL STUDIO</span></footer>
     <!-- New Song Modal -->
     <div class="modal-overlay hidden" id="newSongModal">
       <div class="modal">

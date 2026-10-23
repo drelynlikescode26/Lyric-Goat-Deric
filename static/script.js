@@ -15,6 +15,8 @@ let currentRoughText = "";
 let currentFlowData = {};
 let phraseLoop = null;
 let bpmIsManual = false;
+const changedSounds = new Set();
+let soundBaseline = [], updatingSounds = false;
 
 // Per-version lock state: { versionName: { lineIdx: lockedText } }
 let lockedLines = {};
@@ -26,8 +28,10 @@ const state = {
   gen_mode: "cadence",
   key: "auto",
   keyQuality: "major",
-  genre: "hiphop",
+  genre: "",
+  language: "clean",
   humMode: true,
+  theme: "",
 };
 
 /* ── DOM refs ── */
@@ -54,6 +58,79 @@ const timelineTrack    = document.getElementById("timelineTrack");
 const timelinePlayhead = document.getElementById("timelinePlayhead");
 const timelinePhrases  = document.getElementById("timelinePhrases");
 const melodyBadge      = document.getElementById("melodyBadge");
+const themeInput       = document.getElementById("themeInput");
+themeInput.addEventListener("input", () => { state.theme = themeInput.value; });
+const copyPhrase = phrase => JSON.parse(JSON.stringify(phrase));
+function updateSoundActions() {
+  const blank=[...changedSounds].some(i=>!currentPhraseMap[i].phonetic_hint?.trim());
+  document.getElementById('applySoundEditsBtn').disabled=updatingSounds||!changedSounds.size||blank;
+  document.getElementById('undoSoundEditsBtn').disabled=updatingSounds||!changedSounds.size;
+}
+function markSoundChange(i) {
+  const p=currentPhraseMap[i], baseline=soundBaseline[i];
+  const sound=p.phonetic_hint||makeSyllablePlaceholder(p.target_syllables||p.syllables);
+  const original=baseline.phonetic_hint||makeSyllablePlaceholder(baseline.target_syllables||baseline.syllables);
+  if(sound===original)for(const field of ['sound_source','ending_vowel','rhyme_tail','rhyme_anchors','listening_confidence']) {
+    if(baseline[field]===undefined)delete p[field];else p[field]=JSON.parse(JSON.stringify(baseline[field]));
+  }
+  if(sound===original && (p.target_syllables||p.syllables)===(baseline.target_syllables||baseline.syllables))changedSounds.delete(i);
+  else changedSounds.add(i);
+  updateSoundActions();
+}
+document.getElementById('undoSoundEditsBtn').addEventListener('click',()=>{
+  if(updatingSounds)return;
+  currentPhraseMap.splice(0,currentPhraseMap.length,...soundBaseline.map(copyPhrase));changedSounds.clear();
+  renderOrganizedTranscript(currentRoughText,currentPhraseMap,currentFlowData.melody_mode);updateSoundActions();
+  document.getElementById('soundEditStatus').textContent='Sound edits undone. Your lyrics were kept.';
+});
+document.getElementById("studioVersion").addEventListener("change", selectStudioVersion);
+function selectStudioVersion() {
+  const selected = document.getElementById("studioVersion").value;
+  versionsContainer.querySelectorAll('.version-card').forEach(card => { card.hidden = card.lyricVersion.name !== selected; });
+}
+function refreshStudioVersions() {
+  const select = document.getElementById("studioVersion"), previous = select.value;
+  select.replaceChildren();
+  for (const version of workspace._lastVersions || []) {
+    const option = document.createElement('option'); option.value=version.name; option.textContent=version.label || version.name;select.append(option);
+  }
+  if ([...select.options].some(o=>o.value===previous)) select.value=previous;
+  selectStudioVersion();
+}
+document.getElementById('applySoundEditsBtn').addEventListener('click', async () => {
+  if (updatingSounds || !changedSounds.size) return;
+  const button=document.getElementById('applySoundEditsBtn'), status=document.getElementById('soundEditStatus');
+  if([...changedSounds].some(i=>!currentPhraseMap[i].phonetic_hint?.trim())){status.textContent='Fill in the edited sounds before updating.';return;}
+  const requested=new Map([...changedSounds].map(i=>[i,copyPhrase(currentPhraseMap[i])])), mapAtStart=currentPhraseMap;
+  const previousVersions=workspace._lastVersions || [];
+  const preserved={};
+  for(const version of workspace._lastVersions || []) {
+    preserved[version.name]={...lockedLines[version.name]};
+    version.lyrics.split('\n').forEach((line,i)=>{ if(!changedSounds.has(i)) preserved[version.name][i]=line; });
+  }
+  updatingSounds=true;updateSoundActions();status.textContent='Updating the corrected phrases…';
+  try {
+    const response=await fetch('/regenerate-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      rough_text:currentRoughText,flow_data:currentFlowData,locked_versions:preserved,theme:state.theme,
+      tone:state.tone,mode:state.mode,vibe:state.vibe,gen_mode:state.gen_mode,genre:state.genre,key:state.key,
+      language:state.language
+    })});
+    const data=await response.json();if(!response.ok || !data.success)throw Error(data.error || 'Could not update the lyrics.');
+    if(currentPhraseMap!==mapAtStart)return;
+    stopSync();workspace._lastVersions=data.versions || [];versionsContainer.replaceChildren();
+    workspace._lastVersions.forEach((v,i)=>{
+      const card=createVersionCard(v,i===0,currentPhraseMap),previous=previousVersions.find(old=>old.name===v.name)?.lyrics.split('\n')||[];
+      v.lyrics.split('\n').forEach((line,index)=>{if(previous[index]!==line)card.querySelector(`.lyric-line[data-line="${index}"]`)?.classList.add('line-updated');});
+      versionsContainer.appendChild(card);
+    });
+    refreshStudioVersions();
+    for(const [i,before] of requested) {
+      soundBaseline[i]=before;markSoundChange(i);
+    }
+    status.textContent=changedSounds.size?'Requested lyrics updated. Your newer sound edits are still ready to apply.':'Lyrics updated. Your other lines were kept.';
+  } catch(error) {if(currentPhraseMap===mapAtStart)status.textContent=`${error.message} Your previous lyrics and edits were kept.`;}
+  finally {updatingSounds=false;updateSoundActions();}
+});
 
 /* ══════════════════════════════════
    METRONOME ENGINE (Web Audio API)
@@ -278,6 +355,7 @@ document.querySelectorAll(".pill-group").forEach((group) => {
       group.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
       pill.classList.add("active");
       state[group.dataset.group] = pill.dataset.value;
+      if(group.dataset.group==='genre')checkReady();
     });
   });
 });
@@ -301,7 +379,35 @@ document.querySelectorAll(".key-quality-btn").forEach((btn) => {
   });
 });
 
-function checkReady() { generateBtn.disabled = !(recordedBlob || uploadedFile); }
+function checkReady() {
+  const hasAudio=!!(recordedBlob || uploadedFile);
+  generateBtn.disabled=!hasAudio || !state.genre;
+  const hasLyrics=!resultsSection.classList.contains('hidden');
+  document.getElementById('stepCapture').classList.toggle('current',!hasAudio&&!hasLyrics);
+  document.getElementById('stepStyle').classList.toggle('current',hasAudio&&!hasLyrics);
+  document.getElementById('stepLyrics').classList.toggle('current',hasLyrics);
+  document.getElementById('studioStatus').textContent=!hasAudio?'Start with a recording or audio file, then choose a genre.':!state.genre?'Your take is ready. Choose a genre to shape the words.':'Your take and direction are ready. Let’s find the words.';
+}
+
+document.getElementById('compareTakeBtn')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const take = recordedBlob || uploadedFile;
+  if (!take) { window.location.assign('/compare'); return; }
+  button.disabled = true; button.textContent = 'Preparing this take…';
+  try {
+    const options = await fetch('/api/comparisons/options').then(r => r.json());
+    const body = new FormData();
+    body.append('audio', take, uploadedFile?.name || `recording.${blobExt(take)}`);
+    body.append('title', uploadedFile?.name || 'Studio recording');
+    body.append('bpm', bpmIsManual ? String(metroBpm) : '0');
+    const response = await fetch('/api/comparisons', { method: 'POST', body,
+      headers: { 'X-Comparison-CSRF': options.csrf } });
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || 'Could not prepare this take.');
+    window.location.assign(`/compare?take=${data.id}`);
+  } catch (e) { alert(e.message); }
+  finally { button.disabled = false; button.textContent = 'Compare this take'; }
+});
 
 /* ══════════════════
    HUM MODE TOGGLE
@@ -348,7 +454,7 @@ document.getElementById("resetBtn").addEventListener("click", () => {
 
   // Scroll to top and focus
   window.scrollTo({ top: 0, behavior: "smooth" });
-  generateBtn.disabled = true;
+  checkReady();
 });
 
 document.getElementById("regenerateAllBtn").addEventListener("click", async () => {
@@ -362,6 +468,8 @@ document.getElementById("regenerateAllBtn").addEventListener("click", async () =
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         rough_text: currentRoughText,
+        theme: state.theme,
+        language: state.language,
         flow_data: currentFlowData,
         locked_versions: lockedLines,
         tone: state.tone,
@@ -379,6 +487,7 @@ document.getElementById("regenerateAllBtn").addEventListener("click", async () =
     (data.versions || []).forEach((v, idx) => {
       versionsContainer.appendChild(createVersionCard(v, idx === 0, currentPhraseMap));
     });
+    refreshStudioVersions();
   } catch (err) {
     alert(`Error: ${err.message}`);
   } finally {
@@ -391,7 +500,7 @@ document.getElementById("regenerateAllBtn").addEventListener("click", async () =
    GENERATE
    ══════════════════ */
 generateBtn.addEventListener("click", async () => {
-  if (!(recordedBlob || uploadedFile)) return;
+  if (!(recordedBlob || uploadedFile) || !state.genre) return;
   setGenerating(true);
   const formData = new FormData();
   if (recordedBlob) {
@@ -403,6 +512,8 @@ generateBtn.addEventListener("click", async () => {
   formData.append("tone", state.tone);
   formData.append("mode", state.mode);
   formData.append("vibe", state.vibe);
+  formData.append("theme", state.theme);
+  formData.append("language", state.language);
   formData.append("gen_mode", state.gen_mode);
   const keyValue = state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto";
   formData.append("key", keyValue);
@@ -425,7 +536,10 @@ generateBtn.addEventListener("click", async () => {
 function setGenerating(loading) {
   generateBtn.disabled = loading;
   generateBtn.classList.toggle("loading", loading);
-  generateLabel.textContent = loading ? "Generating..." : "Generate Lyrics";
+  generateLabel.textContent = loading ? "Finding words for your flow…" : "Generate Lyrics";
+  document.getElementById('studioStatus').textContent=loading?'Listening closely and fitting lyrics to your sounds. This may take a moment.':'Ready for your next refinement.';
+  document.getElementById('stepLyrics').classList.toggle('current',loading || !resultsSection.classList.contains('hidden'));
+  if(!loading)checkReady();
   generateSpinner.classList.toggle("hidden", !loading);
 }
 
@@ -435,10 +549,18 @@ function setGenerating(loading) {
 function renderResults(data) {
   stopSync();
   phraseLoop = null;
+  changedSounds.clear();document.getElementById('applySoundEditsBtn').disabled=true;
+  document.getElementById('soundEditStatus').textContent='';
   resultsSection.classList.remove("hidden");
   lockedLines = data.locked_versions || {};
+  if (typeof data.theme === "string") {
+    state.theme = data.theme;
+    themeInput.value = data.theme;
+  }
+  if(data.language)selectPill('language',data.language==='explicit'?'explicit':'clean');
 
   currentPhraseMap = data.phrase_map || [];
+  soundBaseline=currentPhraseMap.map(copyPhrase);updateSoundActions();
   audioDuration = data.flow?.duration || 0;
   currentRoughText = data.rough_text || "";
   currentFlowData = {
@@ -455,7 +577,7 @@ function renderResults(data) {
   if (summary) {
     const heard = data.listening || {};
     summary.textContent = heard.status === "ok"
-      ? `Phrases timed automatically. Delivery: ${(heard.feel || []).join(", ") || "follow your take"}.`
+      ? `${heard.strategy === "detailed" ? "Detailed listening · phrase times and counts are estimates." : "Phrases timed automatically."} Delivery: ${(heard.feel || []).join(", ") || "follow your take"}.`
       : "Phrases timed automatically from your vocal. Audio listening is unavailable; using local rhythm and melody analysis.";
   }
 
@@ -498,6 +620,7 @@ function renderResults(data) {
   (data.versions || []).forEach((v, idx) => {
     versionsContainer.appendChild(createVersionCard(v, idx === 0, currentPhraseMap));
   });
+  refreshStudioVersions();
 
   // Debug / Audit panel
   renderDebugPanel(data.debug_phrases || []);
@@ -527,15 +650,14 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
   const bars = phraseMap.map((phrase, i) => {
     const syls = phrase.syllables || 0;
     const placeholder = phrase.phonetic_hint || makeSyllablePlaceholder(syls);
-    const whisperText = phrase.text || "";
 
     return `<div class="transcript-bar" data-index="${i}">
       <span class="bar-num">${i + 1}</span>
       <div class="bar-content">
-        <span class="bar-placeholder">${escapeHtml(placeholder)}</span>
-        ${whisperText ? `<span class="bar-whisper">${escapeHtml(whisperText)}</span>` : ""}
+        <label class="sound-input-label" for="sound-${i}">Phrase ${i + 1}</label>
+        <input class="bar-placeholder sound-input" id="sound-${i}" value="${escapeHtml(placeholder)}" maxlength="1000" autocomplete="off" spellcheck="false" />
       </div>
-      <div class="slot-controls" aria-label="Adjust syllables for bar ${i + 1}">
+      <div class="slot-controls" aria-label="Adjust syllables for phrase ${i + 1}">
         <button class="slot-step" data-action="minus" title="Remove one syllable">−</button>
         <span class="bar-syls">${syls} syl</span>
         <button class="slot-step" data-action="plus" title="Add one syllable">+</button>
@@ -546,6 +668,14 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
   roughTextEl.innerHTML = bars;
 
   roughTextEl.querySelectorAll(".transcript-bar").forEach((bar) => {
+    bar.querySelector('.sound-input').addEventListener('click',event=>event.stopPropagation());
+    bar.querySelector('.sound-input').addEventListener('input',event=>{
+      const idx=Number(bar.dataset.index);currentPhraseMap[idx].phonetic_hint=event.target.value;
+      currentPhraseMap[idx].sound_source='artist_edit';
+      currentPhraseMap[idx].ending_vowel='unknown';currentPhraseMap[idx].rhyme_tail='';currentPhraseMap[idx].rhyme_anchors=[];
+      markSoundChange(idx);
+      document.getElementById('soundEditStatus').textContent='Sound edits are ready. Adjust syllables if you added a sound, then update the lyrics.';
+    });
     bar.addEventListener("click", () => {
       const idx = parseInt(bar.dataset.index);
       if (currentPhraseMap[idx]) {
@@ -561,16 +691,18 @@ function renderOrganizedTranscript(roughText, phraseMap, melodyMode) {
         const phrase = currentPhraseMap[idx];
         if (!phrase) return;
         const delta = button.dataset.action === "plus" ? 1 : -1;
-        const next = Math.max(1, Math.min(16, (phrase.target_syllables || phrase.syllables || 1) + delta));
+        const next = Math.max(1, Math.min(48, (phrase.target_syllables || phrase.syllables || 1) + delta));
         phrase.syllables = next;
         phrase.target_syllables = next;
-        phrase.max_syllables = next + (next <= 2 ? 0 : 1);
+        phrase.max_syllables = next;
+        phrase.syllable_tolerance = 0;
         phrase.max_words = next;
         phrase.syllable_slots = [];
-        bar.querySelector(".bar-placeholder").textContent = makeSyllablePlaceholder(next);
+        if (!phrase.phonetic_hint) bar.querySelector(".bar-placeholder").value = makeSyllablePlaceholder(next);
         bar.querySelector(".bar-syls").textContent = `${next} syl`;
         bar.classList.add("slot-edited");
         currentFlowData.phrase_map = currentPhraseMap;
+        markSoundChange(idx);
       });
     });
   });
@@ -682,6 +814,7 @@ function createVersionCard(version, isBest, phraseMap) {
     <div class="version-lyrics karaoke-lyrics">${lyricsHtml}</div>
     ${version.quality_status === "needs_review" ? '<p class="quality-warning">Some lines still need a fit or wording pass. Replay your take to compare.</p>' : ""}
     <div class="card-actions">
+      <button class="desk-version-btn" title="Open these words in Lyric Desk">✳ Writing tools</button>
       <button class="copy-btn" data-lyrics="${encodeURIComponent(version.lyrics || "")}">Copy</button>
       ${phraseMap.length ? '<button class="sync-btn">▶ Play Synced</button>' : ""}
       <button class="save-section-btn" title="Save this version into the current song section">💾 Save to Song</button>
@@ -689,6 +822,16 @@ function createVersionCard(version, isBest, phraseMap) {
     </div>
     ${version.score_breakdown ? buildScoreBreakdownPanel(version.score_breakdown) : ""}
   `;
+
+  card.querySelector(".desk-version-btn").addEventListener("click", () => {
+    const lyricText = card.lyricVersion.lyrics || "";
+    const sourceLocks = lockedLines[version.name] || {};
+    const locks = lyricText.split("\n").flatMap((text, line) => sourceLocks[line] !== undefined && text ? [{id:"import-"+line,line,start:0,end:Array.from(text).length,text}] : []);
+    try {
+      localStorage.setItem("lyric-goat-desk-import-v1", JSON.stringify({document:lyricText,locks,title:workspace.currentSong?.title || "Vocal Studio draft",genre:state.genre || "",theme:state.theme || "",language:state.language || "clean"}));
+      window.location.assign("/lyrics");
+    } catch (_) { alert("The browser could not carry this draft over. Copy your lyrics and paste them in Lyric Desk."); }
+  });
 
   // Copy
   card.querySelector(".copy-btn").addEventListener("click", function () {
@@ -795,6 +938,8 @@ async function regenerateSingleLine(card, versionName, lineIdx) {
         context_lines: contextLines,
         locked_lines: versionLocked,
         rough_text: currentRoughText,
+        theme: state.theme,
+        language: state.language,
         flow_data: currentFlowData,
         tone: state.tone,
         mode: state.mode,
@@ -1161,9 +1306,7 @@ async function loadSongs() {
     const data = await res.json();
     workspace.songs = data.songs || [];
     renderSongDropdown();
-    if (workspace.songs.length && !workspace.currentSong) {
-      await loadSong(workspace.songs[0].id);
-    }
+    // Open the studio neutral; saved songs load only when the artist selects one.
   } catch (e) { /* backend unreachable — workspace stays empty */ }
 }
 
@@ -1244,6 +1387,9 @@ function setActiveSection(id, openIt = true) {
 
 /* ── Re-open a saved section in the results view ── */
 function openSavedSection(section) {
+  state.theme = section.settings?.theme || "";
+  themeInput.value = state.theme;
+  selectPill('language',section.settings?.language==='explicit'?'explicit':'clean');
   for (const key of ["tone", "mode", "vibe", "gen_mode", "genre"]) {
     if (section.settings?.[key]) selectPill(key, section.settings[key]);
   }
@@ -1254,6 +1400,8 @@ function openSavedSection(section) {
   const data = {
     success: true,
     rough_text: section.rough_text || "",
+    theme: state.theme,
+    language: state.language,
     phrase_map: pm,
     listening: section.settings?.listening || {},
     locked_versions: section.settings?.locked_lines || {},
@@ -1326,6 +1474,8 @@ async function saveVersionToSection(version, btn) {
   const songId   = workspace.currentSong.id;
   const settings = {
     tone: state.tone, mode: state.mode, vibe: state.vibe,
+    theme: state.theme,
+    language: state.language,
     gen_mode: state.gen_mode, genre: state.genre, hum_mode: state.humMode,
     key: state.key !== "auto" ? `${state.key} ${state.keyQuality}` : "auto",
     bpm: metroBpm,
@@ -1517,3 +1667,9 @@ audioPreview.addEventListener("timeupdate", () => {
   }
 });
 audioPreview.addEventListener("loadedmetadata", () => { phraseLoop = null; });
+
+// Decorative motion is optional and never represents measured audio.
+const motionButton=document.getElementById('motionToggle');
+function setMotion(paused){document.body.classList.toggle('motion-paused',paused);motionButton.setAttribute('aria-pressed',String(paused));motionButton.textContent=paused?'Resume motion':'Pause motion';}
+try{setMotion(localStorage.getItem('lyric-goat-motion-paused')==='true');}catch(_){}
+motionButton.addEventListener('click',()=>{const paused=!document.body.classList.contains('motion-paused');setMotion(paused);try{localStorage.setItem('lyric-goat-motion-paused',String(paused));}catch(_){}});

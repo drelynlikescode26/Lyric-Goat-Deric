@@ -60,14 +60,27 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertEqual(dotenv_values(self.path)["OPENAI_API_KEY"], key)
         self.assertEqual(os.environ["OPENAI_API_KEY"], key)
         self.assertEqual(os.environ["LYRIC_GOAT_WRITER"], "openai")
-        # Blank keeps a saved key while the chosen writer changes immediately.
+        # Blank keeps a saved key; legacy form values cannot change the writer.
         self.client.post("/settings", data={"csrf": self.token(), "api_key": "", "model": "gpt-5.4-mini"})
         self.assertEqual(dotenv_values(self.path)["OPENAI_API_KEY"], key)
-        self.assertEqual(os.environ["OPENAI_GENERATION_MODEL"], "gpt-5.4-mini")
+        self.assertEqual(os.environ["OPENAI_GENERATION_MODEL"], "gpt-6-luna")
+        self.assertNotIn('name="model"', response.text)
 
     def test_invalid_form_never_echoes_secret_or_uses_arbitrary_model(self):
         key = "sk-" + "offline-test" * 5
         response = self.client.post("/settings", data={"csrf": self.token(), "api_key": key,
             "model": "expensive-arbitrary-model"})
         self.assertNotIn(key, response.text)
-        self.assertFalse(self.path.exists())
+        self.assertEqual(dotenv_values(self.path)['OPENAI_GENERATION_MODEL'], 'gpt-6-luna')
+
+    def test_gemini_key_is_private_and_does_not_replace_openai_settings(self):
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-existing-private', 'OPENAI_GENERATION_MODEL': 'gpt-5.4-mini'}):
+            key = 'AIza' + 'private-test' * 4
+            response = self.client.post('/settings', data={'csrf': self.token(), 'action': 'gemini',
+                                        'gemini_key': key}, follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn(key, response.text)
+            self.assertEqual(dotenv_values(self.path)['GEMINI_API_KEY'], key)
+            self.assertEqual(os.environ['OPENAI_API_KEY'], 'sk-existing-private')
+            self.assertEqual(os.environ['OPENAI_GENERATION_MODEL'], 'gpt-5.4-mini')
+            self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)

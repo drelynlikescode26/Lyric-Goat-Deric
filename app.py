@@ -20,6 +20,10 @@ from services.preprocess import preprocess_branches
 from services import projects
 from services import writing_profile
 from services.local_settings import settings, enabled as local_setup_enabled
+from services.comparisons import comparisons
+from services.storage_settings import storage_settings
+from services.cloud_storage import StorageError
+from services.lyric_desk import desk
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
@@ -27,6 +31,14 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict"
 if local_setup_enabled():
     app.config["TRUSTED_HOSTS"] = ["127.0.0.1", "localhost", "[::1]"]
 app.register_blueprint(settings)
+app.register_blueprint(comparisons)
+app.register_blueprint(storage_settings)
+app.register_blueprint(desk)
+
+
+@app.errorhandler(StorageError)
+def storage_error(error):
+    return jsonify({"error": str(error)}), 503
 
 
 @app.before_request
@@ -80,6 +92,8 @@ def process():
         gen_mode = request.form.get("gen_mode", "cadence")
         key      = request.form.get("key", "auto")
         genre      = request.form.get("genre", "hiphop")
+        theme      = request.form.get("theme", "").strip()[:2000]
+        language   = request.form.get("language", "clean")
         manual_bpm = float(request.form.get("manual_bpm", "0") or "0")
         hum_mode   = request.form.get("hum_mode", "false").lower() == "true"
 
@@ -132,11 +146,13 @@ def process():
 
         versions = generate_lyrics(
             rough_text, flow_data,
-            tone=tone, mode=mode, vibe=vibe, gen_mode=gen_mode, key=key, genre=genre
+            tone=tone, mode=mode, vibe=vibe, gen_mode=gen_mode, key=key, genre=genre, theme=theme, language=language
         )
 
         return jsonify({
             "success": True,
+            "theme": theme,
+            "language": "explicit" if language=="explicit" else "clean",
             "rough_text": rough_text,
             "transcription": transcription_diagnostics,
             "listening": listening,
@@ -190,10 +206,11 @@ def regenerate_line():
         gen_mode       = data.get("gen_mode", "cadence")
         key            = data.get("key", "auto")
         genre          = data.get("genre", "hiphop")
+        theme          = str(data.get("theme", "")).strip()[:2000]
 
         new_line = generate_single_line(
             bar_index, syllable_count, context_lines, locked_lines,
-            rough_text, flow_data, tone, mode, vibe, gen_mode, key, genre
+            rough_text, flow_data, tone, mode, vibe, gen_mode, key, genre, theme=theme, language=data.get('language','clean')
         )
 
         return jsonify({"success": True, "line": new_line})
@@ -226,6 +243,8 @@ def regenerate_all():
             key=data.get("key", "auto"),
             genre=data.get("genre", "hiphop"),
             locked_versions=data.get("locked_versions", {}),
+            theme=str(data.get("theme", "")).strip()[:2000],
+            language=data.get('language','clean'),
         )
         return jsonify({"success": True, "versions": versions, "phrase_map": phrase_map})
     except Exception as e:
@@ -355,7 +374,8 @@ def api_get_section_audio(song_id, section_id):
     path = projects.audio_path(section["audio_file"])
     if path is None:
         return jsonify({"error": "Audio file missing"}), 404
-    return send_file(str(path))
+    from services.cloud_storage import audio_response
+    return audio_response(path, key="audio/" + section["audio_file"])
 
 
 @app.route("/api/songs/<song_id>/export", methods=["GET"])

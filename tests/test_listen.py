@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-from services.listen import listen_performance, apply_listening, _validated
+import numpy as np
+import soundfile as sf
+from services import listen
+from services.listen import (listen_acoustic_performance as listen_performance,
+                             apply_listening, _validated)
 
 
 class ListeningTests(unittest.TestCase):
@@ -60,5 +64,53 @@ class ListeningTests(unittest.TestCase):
     def test_provider_failure_remains_visible(self, client):
         p=[{"start_time":0,"end_time":1,"syllables":1}]
         result=listen_performance('unused.wav',p)
+        self.assertEqual(result['status'],'local_only')
+        self.assertEqual(result['reason'],'listening_unavailable')
+
+
+class DetailedListeningTests(unittest.TestCase):
+    @patch.dict('os.environ', {'OPENAI_API_KEY':'offline-test','LYRIC_GOAT_AUDIO_LISTENER':'auto'})
+    @patch('services.listen.OpenAI')
+    def test_default_uses_detailed_sounds_and_own_continuous_windows(self, client):
+        detail = {'summary':'Wordless repeated sounds','feel':['soft'], 'phrases':[
+            {'start_time':.1,'end_time':1.,'syllables':3,'phonetic_hint':'na na oh','heard_words':''},
+            {'start_time':1.,'end_time':1.9,'syllables':4,'phonetic_hint':'da ni na oh','heard_words':''}]}
+        client.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
+            SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content=json.dumps(detail)))])
+        reference = [{'start_time':.1,'end_time':1.9,'syllables':2,'target_syllables':2}]
+        with tempfile.TemporaryDirectory() as d:
+            audio = Path(d)/'test.wav'
+            sf.write(audio, np.zeros(32000), 16000)
+            result = listen.listen_performance(str(audio), reference)
+            part = client.return_value.chat.completions.create.call_args.kwargs['messages'][0]['content'][1]['input_audio']
+            self.assertEqual(base64.b64decode(part['data']),audio.read_bytes())
+        self.assertEqual(result['strategy'],'detailed')
+        flow = apply_listening({'phrase_map':reference},result)
+        self.assertEqual([p['target_syllables'] for p in flow['phrase_map']],[3,4])
+        self.assertEqual(flow['phrase_map'][1]['phonetic_hint'],'da ni na oh')
+        self.assertTrue(flow['phrase_map'][1]['continuous_from_previous'])
+        self.assertEqual(flow['phrase_map'][0]['syllable_slots'],[])
+        self.assertEqual(flow['phrase_map'][1]['max_syllables'],4)
+        self.assertEqual(flow['syllable_count'],7)
+        self.assertEqual(len(flow['debug_phrases']),2)
+
+    def test_uncertain_count_uses_labeled_acoustic_estimate_without_changing_sound(self):
+        detail = listen._detail_result(json.dumps({'phrases':[
+            {'start_time':0,'end_time':2,'syllables':None,'phonetic_hint':'na nee na oh'}]}), 2)
+        flow = apply_listening({'phrase_map':[{'start_time':0,'end_time':2,'syllables':4}]},
+                              dict(detail, status='ok',strategy='detailed'))
+        p = flow['phrase_map'][0]
+        self.assertEqual(p['target_syllables'],4)
+        self.assertEqual(p['syllable_source'],'acoustic_estimate')
+        self.assertEqual(p['phonetic_hint'],'na nee na oh')
+
+    @patch.dict('os.environ', {'OPENAI_API_KEY':'offline-test','LYRIC_GOAT_AUDIO_LISTENER':'auto'})
+    @patch('services.listen.OpenAI')
+    def test_truncated_detail_never_replaces_acoustic_phrases(self, client):
+        client.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
+            SimpleNamespace(finish_reason='length',message=SimpleNamespace(content='{}'))])
+        with tempfile.TemporaryDirectory() as d:
+            audio=Path(d)/'test.wav'; sf.write(audio,np.zeros(16000),16000)
+            result=listen.listen_performance(str(audio),[{'start_time':0,'end_time':1,'syllables':1}])
         self.assertEqual(result['status'],'local_only')
         self.assertEqual(result['reason'],'listening_unavailable')

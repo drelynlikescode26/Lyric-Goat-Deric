@@ -1,0 +1,21 @@
+const {JSDOM}=require('jsdom'),fs=require('fs'),assert=require('node:assert/strict');
+const dom=new JSDOM(fs.readFileSync('templates/lyrics.html','utf8'),{url:'http://localhost/lyrics',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+let calls=[],pendingResolve=null,delayed=false,copied='';w.navigator.clipboard={writeText:async text=>{copied=text}};w.HTMLElement.prototype.scrollIntoView=()=>{};
+w.fetch=async(url,opts)=>{calls.push({url,body:opts?.body&&JSON.parse(opts.body)});if(url.endsWith('/options'))return{ok:true,json:async()=>({csrf:'test',ready:true})};if(url.endsWith('/notebooks')&&!opts)return{ok:true,json:async()=>({notebooks:[]})};
+ if(url.endsWith('/suggestions')){const result={ok:true,json:async()=>({start_line:1,end_line:1,action:'rewrite',suggestions:[{text:'I let you go',warnings:[],syllables:[4]},{text:'I stayed all night',warnings:[],syllables:[4]}]})};if(delayed)return new Promise(resolve=>{pendingResolve=()=>resolve(result)});return result;}
+ return{ok:true,json:async()=>({notebook:{...JSON.parse(opts.body),id:'a'.repeat(32),revision:1},cloud_retry_needed:false})};};
+w.eval(fs.readFileSync('static/lyrics.js','utf8'));const tick=()=>new Promise(r=>setImmediate(r));
+(async()=>{await tick();const $=id=>w.document.getElementById(id),editor=$('lyricDocument');assert.equal(calls.some(c=>c.url.endsWith('/suggestions')),false);
+ editor.value='You left last night\nI kept the light\nYou know my name';editor.dispatchEvent(new w.Event('input'));editor.setSelectionRange(21,21);editor.dispatchEvent(new w.Event('select'));
+ assert.match($('selectionSummary').textContent,/line 2/);$('getSuggestions').click();await tick();assert.equal(w.document.querySelectorAll('.desk-option').length,2);
+ assert.equal(calls.find(c=>c.url.endsWith('/suggestions')).body.start_line,1);w.document.querySelector('.use-option').click();
+ assert.equal(editor.value,'You left last night\nI let you go\nYou know my name');assert.match($('selectionSummary').textContent,/line 2/);assert.equal($('undoSuggestion').disabled,false);
+ const spendBefore=calls.filter(c=>c.url.endsWith('/suggestions')).length;w.document.querySelectorAll('.use-option')[1].click();assert.equal(editor.value,'You left last night\nI stayed all night\nYou know my name');assert.equal(calls.filter(c=>c.url.endsWith('/suggestions')).length,spendBefore);
+ $('undoSuggestion').click();assert.equal(editor.value,'You left last night\nI let you go\nYou know my name');$('undoSuggestion').click();assert.equal(editor.value,'You left last night\nI kept the light\nYou know my name');
+ editor.setSelectionRange(21,21);editor.dispatchEvent(new w.Event('select'));$('getSuggestions').click();await tick();editor.value+='\nA new line';editor.dispatchEvent(new w.Event('input'));
+ assert.equal(w.document.querySelector('.use-option').disabled,true);w.document.querySelector('.use-option').click();assert.match(editor.value,/A new line$/);
+ delayed=true;editor.setSelectionRange(21,21);editor.dispatchEvent(new w.Event('select'));$('getSuggestions').click();await tick();editor.value+='\nMore new words';editor.dispatchEvent(new w.Event('input'));pendingResolve();await tick();assert.equal(w.document.querySelectorAll('.desk-option').length,0);assert.match($('suggestStatus').textContent,/draft changed/);
+ $('copyDraft').click();await tick();assert.equal(copied,editor.value);assert.match(w.localStorage.getItem('lyric-goat-desk-draft-v1'),/More new words/);
+ $('saveDraft').click();await tick();assert.equal(calls.filter(c=>c.url.includes('/notebooks')&&c.body).at(-1).body.document,editor.value);
+ console.log('Lyric Desk checks passed: no automatic AI calls, targeted edits, Undo, stale-result protection, browser backup, copy, save.');w.close();
+})().catch(error=>{console.error(error);w.close();process.exitCode=1;});

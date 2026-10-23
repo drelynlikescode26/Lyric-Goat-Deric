@@ -4,6 +4,7 @@ import json
 import os
 import time
 import uuid
+from services import cloud_storage
 from pathlib import Path
 
 
@@ -32,6 +33,7 @@ def record_feedback(data: dict) -> dict:
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     with FEEDBACK_FILE.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    cloud_storage.queue_file(FEEDBACK_FILE, "profile/writing_feedback.jsonl")
     return entry
 
 

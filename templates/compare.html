@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="comparison-csrf" content="{{ csrf }}" />
+  <title>Lyric Goat · Compare listeners</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/compare.css" />
+  <script src="/static/compare.js" defer></script>
+</head>
+<body>
+<main class="app compare-app">
+  <header class="header">
+    <div class="logo">🐐 LYRIC GOAT</div>
+    <h1>One take. Different ears.</h1>
+    <p class="tagline">Compare what each listener hears in your mumbles.</p>
+    <nav><a href="/">Back to studio</a> · <a href="/settings">API settings</a></nav>
+  </header>
+  <section class="card compare-intake">
+    <h2>Choose a take</h2>
+    <p>Start with 10–30 seconds; up to 90 seconds is supported. Upload once, then reuse the exact same audio after we make tweaks.</p>
+    <form id="takeForm">
+      <label for="takeTitle">Take name</label><input id="takeTitle" maxlength="120" placeholder="Continuous mumble · hook" />
+      <label for="takeFile">Vocal recording</label><input id="takeFile" type="file" accept="audio/*,.webm,.mp4" required />
+      <label for="takeBpm">BPM, if known <span class="muted">(0 = estimate)</span></label>
+      <input id="takeBpm" type="number" min="0" max="300" value="0" />
+      <button class="ws-btn" type="submit" id="saveTake">Save take for comparison</button>
+    </form>
+    <label for="savedTakes">Or reopen a saved comparison</label>
+    <select id="savedTakes"><option value="">Choose a take…</option></select>
+  </section>
+  <section class="card compare-controls" id="compareControls" hidden>
+    <h2 id="activeTitle">Your take</h2>
+    <audio id="sharedAudio" controls preload="metadata"></audio>
+    <button class="ws-btn" type="button" id="stopLoop">Stop phrase loop</button>
+    <p id="takeInfo" class="muted"></p>
+    <fieldset><legend>Choose the listeners</legend><div id="providerChoices"></div></fieldset>
+    <p>Run comparison sends this take to the selected providers and can incur API charges for each selected cloud option. It does not generate lyrics. Detailed OpenAI is a different listening method using the same model.</p>
+    <button class="ws-btn compare-primary" type="button" id="runComparison">Run comparison</button>
+    <p>Older runs stay saved. No listener is crowned “best” automatically—your ratings decide which follows your performance.</p>
+  </section>
+  <p id="compareStatus" role="status" aria-live="polite"></p>
+  <section id="comparisonResults" aria-label="Listening results"></section>
+</main>
+</body>
+</html>

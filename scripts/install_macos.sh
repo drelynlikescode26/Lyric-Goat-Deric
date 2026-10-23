@@ -32,5 +32,10 @@ else
   printf '#!/bin/bash\n# Lyric Goat desktop launcher\nexec /bin/bash %q\n' "$install_dir/Launch-Lyric-Goat.command" > "$desktop_launcher"
   chmod 755 "$desktop_launcher"
 fi
+comparison_launcher="$HOME/Desktop/Compare-Lyric-Goat.command"
+if [[ ! -e "$comparison_launcher" ]] || /usr/bin/grep -q 'Lyric Goat comparison launcher' "$comparison_launcher"; then
+  printf '#!/bin/bash\n# Lyric Goat comparison launcher\nexec /bin/bash %q\n' "$install_dir/Compare-Listeners.command" > "$comparison_launcher"
+  chmod 755 "$comparison_launcher"
+fi
 echo "Installed at $install_dir. Open Lyric-Goat.command on your Desktop next time."
 exec /bin/bash "$install_dir/Launch-Lyric-Goat.command"

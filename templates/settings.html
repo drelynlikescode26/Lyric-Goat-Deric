@@ -18,15 +18,23 @@
       <input type="hidden" name="csrf" value="{{ csrf }}" />
       <label for="api_key">OpenAI API key</label>
       <input id="api_key" name="api_key" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" placeholder="sk-…" {% if not key_present %}required{% endif %} />
-      <label for="model">Lyric writer</label>
-      <select name="model" id="model">
-        {% for value, label in models.items() %}<option value="{{ value }}" {% if value == model %}selected{% endif %}>{{ label }} · {{ value }}</option>{% endfor %}
-      </select>
-      <p>Budget writing is the default. Both choices keep the same melody constraints and lyric checks. Compare them with your own takes.</p>
+      <p>Lyrics use GPT-6 Luna automatically. Type your theme in the studio; your vocal supplies the sounds and pocket.</p>
       <button class="ws-btn" type="submit">Save settings</button>
     </form>
-    <p>The audio listener uses GPT Audio 1.5 to hear your mumbles and delivery. Lyric rewrites reuse that analysis.</p>
-    <p>API usage is billed separately from ChatGPT. Saving settings makes no paid calls. Generating sends your take to OpenAI; saved songs stay on this Mac.</p>
+    <p>Detailed listening hears your mumble sounds and phrasing using GPT Audio 1.5. Lyric rewrites reuse that analysis.</p>
+    <h2>Optional Gemini comparison</h2>
+    <p>{% if gemini_present %}A Google key is saved. Leave this field blank to keep it.{% else %}Add a Google Gemini API key to include Gemini in listening comparisons.{% endif %} Your OpenAI key does not cover Google usage.</p>
+    <form method="post" action="/settings" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ csrf }}" />
+      <input type="hidden" name="action" value="gemini" />
+      <label for="gemini_key">Google Gemini API key</label>
+      <input id="gemini_key" name="gemini_key" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" {% if not gemini_present %}required{% endif %} />
+      <button class="ws-btn" type="submit">Save Gemini key</button>
+    </form>
+    <p>Gemini receives audio only when you select it and run a comparison. Its key is kept in the same private settings file.</p>
+    <p><a href="/storage">Cloud library &amp; storage →</a></p>
+    <p><a href="/compare">Compare listeners →</a></p>
+    <p>API usage is billed separately from ChatGPT. Saving settings makes no paid calls. Generating sends your take to OpenAI; saved songs use your chosen library storage.</p>
     <p><a href="/">Back to the studio →</a></p>
   </section>
 </main></body>

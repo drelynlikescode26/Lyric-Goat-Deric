@@ -10,6 +10,81 @@ from scipy.ndimage import gaussian_filter1d, binary_closing
 from scipy.signal import find_peaks
 
 
+def _cadence_changes(nuclei, step):
+    """Conservative change points in articulations, never in pitch-note counts.
+
+    Compare several intervals on each side. A one-off pickup or syncopation
+    must not turn into a new phrase; straight and repeating swung cadences can.
+    These are heuristic suggestions, not calibrated musical bar boundaries.
+    """
+    times = nuclei * step
+    intervals = np.diff(times)
+    candidates = []
+
+    def repeat_error(values):
+        errors = [np.mean(np.abs(values - np.mean(values)))]
+        if len(values) >= 4:
+            alternating = np.array([np.mean(values[j % 2::2]) for j in range(len(values))])
+            errors.append(np.mean(np.abs(values - alternating)))
+        return min(errors) / max(float(np.mean(values)), .01)
+
+    for i in range(4, len(nuclei) - 3):
+        # Exclude the interval crossing the proposed boundary: it can be a
+        # pickup or a stretched ending between two otherwise stable cadences.
+        left = intervals[max(0, i - 5):i - 1]
+        right = intervals[i:i + 4]
+        if min(sum(left), sum(right)) < .45:
+            continue
+        if max(repeat_error(left), repeat_error(right)) > .08:
+            continue
+        speed = abs(np.log2(np.mean(left) / np.mean(right)))
+        shape = 0.
+        if min(len(left), len(right)) >= 4:
+            shape = float(np.max(np.abs(
+                np.quantile(left / np.mean(left), [.25, .75])
+                - np.quantile(right / np.mean(right), [.25, .75]))))
+        score = max(speed / np.log2(1.6), shape / .35)
+        if score >= 1:
+            candidates.append((score, i))
+    selected = []
+    # Prefer the earlier edge of a near-tied plateau rather than moving a
+    # switch later merely because the next window has tiny frame jitter.
+    for _, i in sorted(candidates, key=lambda item: (-round(item[0], 1), item[1])):
+        if all(abs(i - j) >= 4 and abs(times[i] - times[j]) >= .8 for j in selected):
+            selected.append(i)
+    return sorted(selected)
+
+
+def _phrase_parts(nuclei, envelope, start, end, step, tempo):
+    # Use low-energy points between articulations. Shared edges preserve the
+    # continuous timeline instead of inventing a silence between lyric lines.
+    bounds = [start]
+    for left, right in zip(nuclei, nuclei[1:]):
+        margin = max(1, int((right - left) * .15))
+        lo, hi = int(left + margin), int(right - margin)
+        valley = envelope[lo:hi + 1]
+        options = np.flatnonzero(valley <= valley.min() + float(valley.max()) * .005) + lo
+        bounds.append(int(options[np.argmin(abs(options - (left + right) / 2))]))
+    bounds.append(end)
+    cuts = {0: "vocal_start", **{i: "cadence_change" for i in _cadence_changes(nuclei, step)}}
+    # Estimated BPM supplies a phrase-length guide, not a claimed downbeat.
+    # Length alone can divide multiple articulations, never a single held run.
+    target_span = max(2., min(4., 4 * 60 / max(float(tempo), 40)))
+    anchors = sorted(cuts) + [len(nuclei)]
+    for a, b in zip(anchors, anchors[1:]):
+        while b - a > 16 or (bounds[b] - bounds[a]) * step > target_span * 1.25:
+            choices = list(range(a + 1, min(a + 16, b - 1) + 1))
+            if not choices:
+                break
+            target = min(bounds[a] + target_span / step, bounds[choices[-1]])
+            cut = min(choices, key=lambda j: abs(bounds[j] - target)
+                      + max(0, .45 / step - (bounds[b] - bounds[j])))
+            cuts[cut] = "syllable_limit" if cut == a + 16 else "phrase_length"
+            a = cut
+    points = sorted(cuts) + [len(nuclei)]
+    return [(a, b, bounds[a:b + 1], cuts[a]) for a, b in zip(points, points[1:])]
+
+
 def vocal_phrases(y, sr, tempo=90.0):
     samples = np.asarray(y, dtype=float)
     if not len(samples) or not np.isfinite(samples).all():
@@ -49,13 +124,8 @@ def vocal_phrases(y, sr, tempo=90.0):
         if not len(nuclei):
             nuclei = np.array([start + int(np.argmax(window))])
         nuclei = np.unique(nuclei)
-        # Split long continuous passages at syllable boundaries, not at notes.
-        for offset in range(0, len(nuclei), 16):
-            part = nuclei[offset:offset + 16]
-            a = start if offset == 0 else int((nuclei[offset - 1] + part[0]) / 2)
-            last = offset + len(part)
-            b = end if last == len(nuclei) else int((part[-1] + nuclei[last]) / 2)
-            bounds = [a] + [int((x + z) / 2) for x, z in zip(part, part[1:])] + [b]
+        for offset, last, bounds, source in _phrase_parts(nuclei, envelope, start, end, step, tempo):
+            part = nuclei[offset:last]
             slots = []
             for i, nucleus in enumerate(part):
                 energy = float(envelope[nucleus] / peak)
@@ -71,6 +141,9 @@ def vocal_phrases(y, sr, tempo=90.0):
                            "start_time": slots[0]["start_time"],
                            "end_time": slots[-1]["end_time"],
                            "timing_source": "acoustic_nuclei",
+                           "boundary_source": source if offset else ("pause" if result else "vocal_start"),
+                           "boundary_estimated": bool(offset),
+                           "continuous_from_previous": bool(offset),
                            "syllable_confidence": "estimated"})
     return result
 
