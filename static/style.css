@@ -61,6 +61,11 @@ body {
 }
 
 /* ── Cards ── */
+.setup-card { display: grid; gap: 18px; line-height: 1.5; }
+.setup-card form { display: grid; gap: 12px; }
+.setup-card input, .setup-card select { width: 100%; padding: 12px; color: var(--text); background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
+.setup-card a, .tagline a { color: #bca4ff; }
+.setup-card [role="alert"] { color: #fca5a5; }
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

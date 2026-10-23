@@ -1,6 +1,7 @@
 import os
 import time
 import tempfile
+import secrets
 import soundfile as sf
 import numpy as np
 from pathlib import Path
@@ -18,9 +19,26 @@ from services.listen import listen_performance, apply_listening
 from services.preprocess import preprocess_branches
 from services import projects
 from services import writing_profile
+from services.local_settings import settings, enabled as local_setup_enabled
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict")
+if local_setup_enabled():
+    app.config["TRUSTED_HOSTS"] = ["127.0.0.1", "localhost", "[::1]"]
+app.register_blueprint(settings)
+
+
+@app.before_request
+def protect_local_app():
+    if local_setup_enabled():
+        if request.remote_addr not in {"127.0.0.1", "::1"}:
+            return jsonify({"error": "Local access only."}), 403
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("Origin")
+            if ((origin and origin != request.host_url.rstrip("/"))
+                    or request.headers.get("Sec-Fetch-Site") == "cross-site"):
+                return jsonify({"error": "Open Lyric Goat directly to continue."}), 403
 
 UPLOAD_FOLDER = Path("uploads")
 UPLOAD_FOLDER.mkdir(exist_ok=True)
@@ -35,12 +53,12 @@ for _f in UPLOAD_FOLDER.iterdir():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", local_setup=local_setup_enabled())
 
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "app": "lyric-goat"})
 
 
 @app.route("/process", methods=["POST"])
@@ -349,4 +367,4 @@ def api_export_song(song_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="127.0.0.1", port=8765)

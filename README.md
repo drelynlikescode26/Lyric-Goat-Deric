@@ -21,81 +21,109 @@ An audio-capable OpenAI model listens to the actual melody WAV for phonetic
 hints, ending vowels and emotional delivery. High-confidence articulation counts
 can resolve legato mumbles missed by amplitude analysis. Phrase boundaries stay
 measured; any new internal subdivisions are explicitly marked as estimates.
-Claude receives those performance constraints and creates three lyric versions.
+The lyric writer receives those performance constraints and creates three lyric versions.
 Pronunciation-based checks flag poor syllable fit, overflow and stock phrases;
 one optional batched repair edits only failed lines. Locked lines are preserved.
 
 Timing and slot editing remain optional fine-tuning tools after generation.
 Regenerating uses the existing analysis rather than uploading or listening again.
 
-## Setup
+## Mac mini setup
 
-### Requirements
+The local version opens in Safari at **http://127.0.0.1:8765** while its launcher
+is running. This address works only on the computer running the app; it is not a
+hosted preview. The Mac installation must be completed before that link works.
 
-- Python 3.10+
-- **ffmpeg** (required for audio format conversion)
+1. Install [Homebrew](https://brew.sh) once if it is not already available.
+2. Download this repository, then open `Install-Lyric-Goat.command`. If macOS
+   asks, use Finder's Open action for the downloaded command file.
+3. Setup installs Python 3.12 and ffmpeg through Homebrew, creates an isolated
+   Python environment, and puts `Lyric-Goat.command` on your Desktop. The first
+   run can take several minutes.
+4. Safari opens the app's local OpenAI settings. Save your OpenAI API key there.
+   A key is stored only in the installation's gitignored `.env`, readable by
+   your Mac user. A saved key is never rendered back into the page.
+5. Upload a 10–30 second vocal or allow Safari microphone access and record one.
+
+The installed app lives in `~/Applications/Lyric-Goat`. Keep its Terminal window
+open while using it. Close that window (or press Control-C) when finished.
+Reopen the Desktop launcher for the next test: it checks GitHub `main` for
+updates and installs changed dependencies. If an earlier instance is still
+running, it reopens that instance; close its Terminal window before relaunching
+to load updates. Modified tracked files, other branches and diverged history are
+preserved rather than overwritten. Without GitHub access the installed version
+still starts; generating lyrics requires an internet connection to OpenAI.
+
+No GitHub login is needed to clone this public repository. Signing into OpenAI
+in Safari alone does not configure the app; its API key is separate from your
+ChatGPT subscription. Saving settings makes no API call and does not verify
+billing, model access or subjective lyric quality. The first generated take
+checks the real pipeline. Do not paste your key into chat or commit it to git.
+
+### Models and cost
+
+Only **one OpenAI API key** is required. The default writer is
+`OPENAI_GENERATION_MODEL=gpt-6-luna`, with low reasoning, a 4,096 output-token
+cap and no automatic SDK retries. The local Settings page also offers
+`gpt-5.4-mini` for comparing writing on the same takes. No automatic fallback
+switches you to a more expensive model. These are starting choices for real
+vocal testing, not a claim that either reproduces your writing style.
+
+Official standard text prices checked October 23, 2026:
+
+| Lyric writer | Input / million tokens | Output / million tokens |
+| --- | ---: | ---: |
+| GPT-6 Luna (default) | $0.10 | $0.50 |
+| GPT-5.4 Mini (optional comparison) | $0.75 | $4.50 |
+
+For example, 6,000 input and 4,000 output tokens on Luna cost about **$0.0026**
+for the writing call. Reasoning counts toward billed output. This is an example,
+not a measured per-take price or spending cap; audio listening is additional.
+See [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and
+[GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna).
+
+- `OPENAI_LISTENING_MODEL=gpt-audio-1.5` hears the actual take and returns only
+  text observations. Its audio input costs $32/million audio tokens, and text
+  input/output costs $2.50/$10 per million. The app does not generate paid audio
+  output. Audio tokens differ from text tokens. The older cheaper Audio Mini is
+  deprecated, so it is not the default for a new installation.
+- A capture normally makes one listening call and one writing call. A second
+  writing call happens only when fit/stock-phrase checks find failed lines.
+- New Versions reuses the listening analysis. One-line rewrites use at most two
+  writing calls. All captures are limited to 90 seconds; start with short takes.
+- Melody First skips separate speech transcription. Turning it off can add
+  transcription charges. Native-listener failures visibly fall back to local
+  rhythm/pitch analysis, which has less phonetic/feel detail.
+- `LYRIC_GOAT_AUDIO_LISTENER=off` disables paid native listening, with that same
+  tradeoff. Lyric writing still uses the selected paid writer.
+- Nothing calls a paid model at startup or in offline tests/benchmarks.
+
+Audio model references: [GPT Audio 1.5](https://developers.openai.com/api/docs/models/gpt-audio-1.5),
+[Audio Mini status](https://developers.openai.com/api/docs/models/gpt-audio-mini).
+
+### Existing installations and other platforms
+
+Python 3.10–3.13 and ffmpeg are required. On Ubuntu/Debian, install ffmpeg with
+`sudo apt install ffmpeg`. Then:
 
 ```bash
-# macOS
-brew install ffmpeg
-
-# Ubuntu/Debian
-sudo apt install ffmpeg
-```
-
-### Install
-
-```bash
-git clone https://github.com/drelynlikescode26/Lyric-Goat-Deric
+git clone https://github.com/drelynlikescode26/Lyric-Goat-Deric.git
 cd Lyric-Goat-Deric
-
-pip install -r requirements.txt
-
-cp .env.example .env
-# Edit .env and add your API keys
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python scripts/run_local.py
 ```
 
-### API Keys
+The local runner enables the key setup page, restricts access to loopback and
+uses Waitress without a debugger. To choose a different port, set
+`LYRIC_GOAT_PORT=8766` in `.env`. It detects another instance or port collision.
+The root `python app.py` command also binds only to loopback, without key setup.
 
-Edit `.env`:
-```
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-FLASK_SECRET_KEY=any-random-string
-```
-
-- **Anthropic key** → https://console.anthropic.com
-- **OpenAI key** → https://platform.openai.com (for native audio listening and optional transcription)
-
-The app does not call either provider at startup. The offline detector benchmark
-also makes no paid API calls.
-
-### Models and call budget
-
-- `OPENAI_LISTENING_MODEL=gpt-audio-1.5` receives the actual audio and returns text
-  observations. `LYRIC_GOAT_AUDIO_LISTENER=auto` enables it when the OpenAI key is
-  configured. Set it to `off` for local rhythm/pitch analysis only.
-- A capture normally makes one listening call and one Claude writing call. A
-  second Claude call occurs only when local fit/stock-phrase checks find failures.
-- New Versions does not call the audio listener again. One-line rewrites use at
-  most two writing calls and leave the old line intact if neither fits.
-- Melody First skips speech transcription. With it off,
-  `LYRIC_GOAT_TRANSCRIPTION_MODE=timed|semantic|hybrid` adds respectively one
-  Whisper call, one GPT-4o Transcribe call, or both. Transcription failure can fall
-  back to audio-only analysis; the response surfaces this state.
-- Listener failures fall back to local timing and melody analysis with a visible
-  status. This fallback cannot infer mouth sounds or delivery with the native
-  audio model's detail. A Claude key is still required to write lyrics.
-- Generation and listening are paid API usage, not included in ChatGPT. No model
-  calls occur at startup or in the offline test suite/benchmark.
-
-### Run
-
-```bash
-python app.py
-```
-
-Open http://localhost:5000
+Existing Anthropic users can keep `.env` with `ANTHROPIC_API_KEY` and
+`LYRIC_GOAT_WRITER=anthropic`; `ANTHROPIC_GENERATION_MODEL` remains configurable.
+Without an explicit provider, `auto` prefers an available OpenAI key and otherwise
+uses Anthropic. The Mac Settings page explicitly selects OpenAI. Hosted deployments
+must set keys through their host's environment; local key setup is disabled there.
 
 ## Style Controls
 
@@ -121,7 +149,7 @@ services/
   projects.py           Local-first songs, sections, and audio
   writing_profile.py    Accepted/edited/rejected lyric feedback history
 benchmarks/             Personal clip manifest (audio stays gitignored)
-scripts/                Offline detection benchmark
+scripts/                Mac installer/launcher, private local runner and benchmark
 supabase/               Optional future hosted schema; not active by default
 tests/                  Offline unit and smoke tests
 templates/index.html    UI
@@ -165,13 +193,13 @@ constraints; it is not an artistic quality rating or a claim of Suno parity.
 
 ## Runtime and data
 
-ffmpeg is required for compressed mic uploads. Gunicorn's 240-second request
+ffmpeg is required for compressed mic uploads. The local runner binds only to 127.0.0.1. Gunicorn's 240-second request
 budget accommodates the listening/writing stages. BPM is estimated unless the
 user sets it or uses the metronome; a dry vocal does not establish the backing
 track's true tempo, downbeat or absolute bar number. Timing is relative to the
 original recording, so preserve your DAW export offset when working on a section.
 
-Songs, audio and accepted-line feedback remain local files. Use a persistent
+Saved songs, audio and accepted-line feedback remain local files. Generating sends the take to OpenAI for listening and performance descriptions to the selected writer. Use a persistent
 volume or local deployment to retain them. Feedback is collected but not yet used
 as a trained writing profile. The server has no user authentication; keep access
 private when storing unreleased recordings. Supabase is an inactive future schema.
