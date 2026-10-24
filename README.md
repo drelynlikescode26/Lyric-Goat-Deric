@@ -387,3 +387,9 @@ has responsive layouts, but localhost is not a phone-accessible deployment.
 Hook design reference: Berklee's [How to Write Killer Song Hooks](https://online.berklee.edu/takenote/how-to-write-songs-with-killer-hooks/)
 (repetition, contrast and placement). Sound reference: the
 [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict).
+
+## Future experiments
+
+Keep refining the mumble-to-lyrics workflow first. Later experiments: a private
+singing-voice model trained on the artist’s own dry vocals, and a Logic Pro
+Audio Unit workflow. These are future directions, not currently installed features.

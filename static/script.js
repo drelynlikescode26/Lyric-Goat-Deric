@@ -1667,9 +1667,3 @@ audioPreview.addEventListener("timeupdate", () => {
   }
 });
 audioPreview.addEventListener("loadedmetadata", () => { phraseLoop = null; });
-
-// Decorative motion is optional and never represents measured audio.
-const motionButton=document.getElementById('motionToggle');
-function setMotion(paused){document.body.classList.toggle('motion-paused',paused);motionButton.setAttribute('aria-pressed',String(paused));motionButton.textContent=paused?'Resume motion':'Pause motion';}
-try{setMotion(localStorage.getItem('lyric-goat-motion-paused')==='true');}catch(_){}
-motionButton.addEventListener('click',()=>{const paused=!document.body.classList.contains('motion-paused');setMotion(paused);try{localStorage.setItem('lyric-goat-motion-paused',String(paused));}catch(_){}});

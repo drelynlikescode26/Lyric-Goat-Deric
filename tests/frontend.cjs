@@ -24,8 +24,6 @@ w.eval(fs.readFileSync(root+'/static/script.js','utf8'));
  assert.equal(w.document.getElementById('currentSongTitle').textContent,'Your saved songs');
  assert.equal(w.document.querySelectorAll('[data-group="genre"] .active').length,0);
  assert.equal(w.document.querySelectorAll('.studio-details[open]').length,0);
- w.document.getElementById('motionToggle').click();assert.equal(w.document.body.classList.contains('motion-paused'),true);
- w.document.getElementById('motionToggle').click();assert.equal(w.document.body.classList.contains('motion-paused'),false);
 
  const version={name:'melodic',label:'Closest to Your Take',lyrics:'I keep moving',score:.8,quality_status:'checked'};
  w.renderResults({phrase_map:[{start_time:.5,end_time:2,syllables:4,target_syllables:4}],flow:{duration:3},listening:{status:'ok',feel:['aching']},versions:[version]});

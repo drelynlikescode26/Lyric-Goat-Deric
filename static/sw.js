@@ -1,4 +1,4 @@
-const CACHE = 'lyric-goat-v12-writing-workshop';
+const CACHE = 'lyric-goat-v13-studio-motion';
 const STATIC = [
   '/',
   '/static/style.css',
