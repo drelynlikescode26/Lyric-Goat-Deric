@@ -393,3 +393,17 @@ Hook design reference: Berklee's [How to Write Killer Song Hooks](https://online
 Keep refining the mumble-to-lyrics workflow first. Later experiments: a private
 singing-voice model trained on the artist’s own dry vocals, and a Logic Pro
 Audio Unit workflow. These are future directions, not currently installed features.
+
+### Compare phrase timing separately from mumble sounds
+
+In **Listener lab**, **Mark my phrase breaks** lets the artist tap the playback
+position where the next phrase starts, or enter precise seconds and save them.
+Saved marks belong to the exact audio checksum, use revision conflict checks, and
+never alter the recording or make an AI call. They remain hidden from the models
+so the comparison stays independent. Each result shows its nearest estimated
+internal boundary and flags a phrase that crosses a mark by more than 0.20s on
+both sides. This tolerance is only a review aid, not a measured accuracy score.
+The marks do not automatically split the main studio's generated lyrics.
+
+The comparison defaults to Detailed OpenAI and Gemini when ready; other listeners
+remain opt-in. Creating or adding a Google key does not switch the studio default.

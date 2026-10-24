@@ -177,3 +177,28 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn('No vocal', response.json['error'])
         self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_artist_boundary_marks_roundtrip_without_ai_or_audio_changes(self):
+        report=self.upload();identity=report['id'];before=(self.root/identity/'take.wav').read_bytes()
+        with patch.object(module,'OpenAI') as ai,patch.object(module.httpx,'post') as google:
+            response=self.client.post(f'/api/comparisons/{identity}/boundaries',headers=self.headers,
+                json={'cuts':[.5,1.25],'revision':0,'audio_sha256':report['audio_sha256']})
+            self.assertEqual(response.status_code,200,response.json);ai.assert_not_called();google.assert_not_called()
+        reopened=self.client.get(f'/api/comparisons/{identity}').json
+        self.assertEqual(reopened['boundary_reference']['cuts'],[.5,1.25]);self.assertEqual(reopened['boundary_reference']['source'],'artist_marks')
+        self.assertEqual((self.root/identity/'take.wav').read_bytes(),before);self.assertEqual(reopened['runs'],[])
+        cleared=self.client.post(f'/api/comparisons/{identity}/boundaries',headers=self.headers,
+            json={'cuts':[],'revision':1,'audio_sha256':report['audio_sha256']})
+        self.assertEqual(cleared.status_code,200);self.assertEqual(cleared.json['boundary_reference']['cuts'],[])
+
+    def test_boundary_marks_reject_wrong_take_stale_edits_and_invalid_times(self):
+        report=self.upload();identity=report['id'];endpoint=f'/api/comparisons/{identity}/boundaries'
+        payload={'cuts':[.5],'revision':0,'audio_sha256':report['audio_sha256']}
+        self.assertEqual(self.client.post(endpoint,json=payload).status_code,403)
+        for cuts in [[True],[float('nan')],[-.1],[0],[2.1],[1,.5],[.5,.51],['.5'],[.1]*65]:
+            response=self.client.post(endpoint,headers=self.headers,json={**payload,'cuts':cuts})
+            self.assertEqual(response.status_code,400,response.json)
+        self.assertEqual(self.client.post(endpoint,headers=self.headers,json={**payload,'audio_sha256':'different'}).status_code,409)
+        self.assertEqual(self.client.post(endpoint,headers=self.headers,json={**payload,'revision':1}).status_code,409)
+        self.assertEqual(self.client.post(endpoint,headers=self.headers,json=payload).status_code,200)
+        self.assertEqual(self.client.post(endpoint,headers=self.headers,json=payload).status_code,409)

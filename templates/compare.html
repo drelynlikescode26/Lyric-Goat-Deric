@@ -35,6 +35,7 @@
     <audio id="sharedAudio" controls preload="metadata"></audio>
     <button class="ws-btn" type="button" id="stopLoop">Stop phrase loop</button>
     <p id="takeInfo" class="muted"></p>
+    <details class="boundary-tools"><summary>Mark my phrase breaks <span class="muted">Optional · no AI credit</span></summary><p>Play the full take and tap when the next phrase starts, even if you keep mumbling without a pause. These are your reference marks; the listeners do not see them.</p><button class="ws-btn" type="button" id="markBoundary">Mark break at playhead</button><label for="boundaryTimes">Break times in seconds, separated by commas</label><input id="boundaryTimes" inputmode="decimal" placeholder="2.40, 5.10, 8.35"><button class="ws-btn" type="button" id="saveBoundaries">Save my phrase marks</button><p id="boundaryStatus" role="status" class="muted">Marks help compare timing. They do not change the recording or split generated lyrics automatically.</p></details>
     <fieldset><legend>Choose the listeners</legend><div id="providerChoices"></div></fieldset>
     <p>Run comparison sends this take to the selected providers and can incur API charges for each selected cloud option. It does not generate lyrics. Detailed OpenAI is a different listening method using the same model.</p>
     <button class="ws-btn compare-primary" type="button" id="runComparison">Run comparison</button>

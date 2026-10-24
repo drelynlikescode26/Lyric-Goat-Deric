@@ -35,3 +35,5 @@
 .compare-error { color: #fca5a5; }
 .compare-preferred { border-color: #8b5cf6; }
 .compare-app :focus-visible { outline: 3px solid var(--accent2); outline-offset: 3px; }
+
+.boundary-tools{border:1px solid var(--border);border-radius:8px;padding:14px}.boundary-tools summary,.boundary-audit summary{cursor:pointer;min-height:38px}.boundary-tools p,.boundary-audit p{font-size:.85rem;line-height:1.65}.boundary-tools[open]{display:grid;gap:10px}.boundary-tools summary span{display:inline-block;margin-left:10px}.boundary-tools label{font-size:.85rem}.boundary-audit{border-top:1px solid var(--border);padding-top:12px}.boundary-crossing{color:#facc8b}

@@ -14,7 +14,7 @@ const providers = [
   {id: 'openai_detail', label: 'Detailed', ready: true, model: 'gpt-audio-1.5', description: 'Detailed task', destination: 'OpenAI'},
   {id: 'gemini', label: 'Gemini', ready: false, reason: 'Add a Google key.', description: 'Other listener'},
 ];
-let report = {id, title: 'My take', duration: 8, runs: [{id: 'run1', revision: 'version1', created_at: 100,
+let report = {id, audio_sha256:'b'.repeat(64), title: 'My take', duration: 8, runs: [{id: 'run1', revision: 'version1', created_at: 100,
   status: 'complete', review: {}, results: [
     {...providers[0], status: 'ok', elapsed_seconds: 1, phrases: [{start_time: 1, end_time: 2.5,
       target_syllables: 3, phonetic_hint: '<img src=x onerror=alert(1)>', delivery: 'Held run', timing_source: 'model_estimate'}]},
@@ -28,6 +28,7 @@ w.fetch = async (url, opts) => {
   else if (url.endsWith('/review')) {
     report.runs[0].review = {preferred: body.provider, ratings: {[body.provider]: {scores: body.scores, notes: body.notes}}};
     response = report;
+  } else if(url.endsWith('/boundaries')) { report.boundary_reference={cuts:body.cuts,revision:1};response=report;
   } else if (url.endsWith('/runs')) response = {status: 'running'};
   else if (url === '/api/comparisons') response = {comparisons: [report]};
   else response = report;
@@ -55,9 +56,19 @@ w.eval(fs.readFileSync(root + '/static/compare.js', 'utf8'));
   assert.deepEqual(review.body.scores, {flow: 4, sounds: 4, syllables: 4});
   assert.ok(review.headers['X-Comparison-CSRF']);
   assert.match(w.document.getElementById('comparisonResults').textContent, /Your pick/);
+  w.document.getElementById('sharedAudio').currentTime=1.5;
+  w.document.getElementById('markBoundary').click();
+  assert.equal(w.document.getElementById('boundaryTimes').value,'1.50');
+  assert.equal(calls.filter(x=>x.url.endsWith('/runs')).length,0,'marking a break never buys a model call');
+  w.document.getElementById('saveBoundaries').click();await tick();
+  const marks=calls.find(x=>x.url.endsWith('/boundaries'));
+  assert.deepEqual(marks.body.cuts,[1.5]);assert.equal(marks.body.audio_sha256,'b'.repeat(64));
+  assert.match(w.document.getElementById('comparisonResults').textContent,/Phrase 1 runs across your mark/);
+  w.document.getElementById('boundaryTimes').value='1.0,,2.0';w.document.getElementById('saveBoundaries').click();await tick();
+  assert.equal(calls.filter(x=>x.url.endsWith('/boundaries')).length,1,'bad marks are not sent');
   w.document.getElementById('runComparison').click(); await tick(); await tick();
   const run = calls.find(x => x.url.endsWith('/runs'));
-  assert.deepEqual(run.body.providers, ['openai_current', 'openai_detail']);
+  assert.deepEqual(run.body.providers, ['openai_detail']);
   assert.equal(w.document.querySelectorAll('.compare-run').length, 1, 'previous results remain visible');
   console.log('Comparison UI checks passed: no auto-spend, unavailable providers, safe model text, phrase loops, saved ratings, selected listeners.');
   dom.window.close();

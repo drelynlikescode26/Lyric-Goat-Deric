@@ -368,6 +368,29 @@ def _one(option, audio, report):
 
 
 
+@comparisons.route("/api/comparisons/<identity>/boundaries", methods=["POST"])
+def save_boundaries(identity):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict): return jsonify(error="Send the phrase-break times first."), 400
+    cuts = data.get("cuts")
+    if (not isinstance(cuts, list) or len(cuts) > 64 or any(type(c) not in {int, float} or not math.isfinite(c) for c in cuts)):
+        return jsonify(error="Use up to 64 phrase breaks, in seconds."), 400
+    folder = _folder(_root(), identity)
+    with _files:
+        report = _load(folder)
+        if data.get("audio_sha256") != report["audio_sha256"]:
+            return jsonify(error="This recording changed. Reopen the correct take before marking breaks."), 409
+        previous = report.get("boundary_reference", {})
+        if type(data.get("revision")) is not int or data["revision"] != previous.get("revision", 0):
+            return jsonify(error="Phrase marks were updated in another tab. Reopen this take before editing them."), 409
+        if any(not .03 < c < report["duration"] - .03 for c in cuts) or any(b-a < .1 for a,b in zip(cuts,cuts[1:])):
+            return jsonify(error="Put breaks inside the recording, in increasing order, at least 0.10 seconds apart."), 400
+        report["boundary_reference"] = dict(cuts=[round(c, 3) for c in cuts], revision=previous.get("revision", 0)+1,
+            updated_at=time.time(), audio_sha256=report["audio_sha256"], source="artist_marks")
+        _save(folder, report)
+    return jsonify(report)
+
+
 @comparisons.route("/api/comparisons/<identity>/review", methods=["POST"])
 def review(identity):
     data = request.get_json(silent=True) or {}

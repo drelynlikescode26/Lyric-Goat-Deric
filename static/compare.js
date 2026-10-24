@@ -38,7 +38,7 @@
       const label = element('label', undefined, 'compare-provider');
       const check = document.createElement('input'); check.type = 'checkbox'; check.value = provider.id;
       check.name = 'provider'; check.disabled = !provider.ready;
-      check.checked = provider.ready && ['openai_current', 'openai_detail', 'transcribe'].includes(provider.id);
+      check.checked = provider.ready && ['openai_detail', 'gemini'].includes(provider.id);
       const body = element('span');
       body.append(element('strong', provider.label), element('small', provider.description),
         element('small', provider.ready ? `${provider.model} · ${provider.destination}` : provider.reason));
@@ -55,7 +55,7 @@
     $('takeInfo').textContent = `${report.duration}s · Saved locally · The same saved audio is used by every listener and rerun.`;
     $('savedTakes').value = id;
     window.history.replaceState(null, '', `/compare?take=${id}`);
-    render(report); schedule(report);
+    renderBoundaryEditor(report); render(report); schedule(report);
     status('Take ready. Select listeners, then run the comparison.');
   }
   function schedule(report) {
@@ -72,7 +72,7 @@
     }, 1500);
   }
   function render(report) {
-    const encoded = JSON.stringify(report.runs);
+    const encoded = JSON.stringify([report.runs, report.boundary_reference]);
     if (encoded === lastRendered) return;
     lastRendered = encoded;
     $('runComparison').disabled = report.runs.some(r => r.status === 'running');
@@ -121,9 +121,45 @@
       part.appendChild(play); phrases.appendChild(part);
     }
     node.appendChild(phrases);
+    if(report.boundary_reference?.cuts?.length)node.appendChild(boundaryAudit(report,result));
     if (run.status === 'complete') node.appendChild(reviewForm(report, run, result));
     return node;
   }
+  function renderBoundaryEditor(report) {
+    $('boundaryTimes').value=(report.boundary_reference?.cuts||[]).map(c=>Number(c).toFixed(2)).join(', ');
+    $('boundaryStatus').textContent=report.boundary_reference?.cuts?.length?'Your phrase marks are saved. Each listening result shows how its boundaries compare.':'Play the full take and mark where your next phrase begins. You can adjust the numbers before saving.';
+  }
+  function boundaryAudit(report,result) {
+    const panel=element('details',undefined,'boundary-audit');panel.appendChild(element('summary','Timing against your phrase marks'));
+    const phrases=result.phrases||[],edges=[...phrases.slice(1).map(p=>p.start_time),...phrases.slice(0,-1).map(p=>p.end_time)];
+    if(!phrases.length){panel.appendChild(element('p','This listener did not supply phrase boundaries.'));return panel;}
+    for(const cut of report.boundary_reference.cuts){
+      const edge=edges.length?edges.reduce((best,t)=>Math.abs(t-cut)<Math.abs(best-cut)?t:best):null;
+      const crossing=phrases.findIndex(p=>p.start_time<cut-.2&&p.end_time>cut+.2);
+      let text=`Your break ${cut.toFixed(2)}s · `;
+      if(edge===null)text+='No internal phrase split supplied.';
+      else {const delta=edge-cut;text+=`nearest boundary ${edge.toFixed(2)}s (${delta>=0?'+':''}${delta.toFixed(2)}s).`;}
+      if(crossing>=0&&(edge===null||Math.abs(edge-cut)>.2))text+=` Phrase ${crossing+1} runs across your mark.`;
+      panel.appendChild(element('p',text,crossing>=0&&(edge===null||Math.abs(edge-cut)>.2)?'boundary-crossing':'muted'));
+    }
+    panel.appendChild(element('p','Offsets compare your marks with estimated phrase starts/ends. They are not an automatic accuracy score.','muted'));return panel;
+  }
+  $('markBoundary').addEventListener('click',()=>{
+    if(!active)return;const time=audio.currentTime;
+    if(!Number.isFinite(time)||time<=.03||time>=active.duration-.03){$('boundaryStatus').textContent='Move into the recording first, then mark the start of the next phrase.';return;}
+    loop=null;const text=$('boundaryTimes').value.trim();$('boundaryTimes').value=text+(text?', ':'')+time.toFixed(2);
+    $('boundaryStatus').textContent='Break added. Adjust the times if needed, then Save my phrase marks.';
+  });
+  $('boundaryTimes').addEventListener('input',()=>{$('boundaryStatus').textContent='Marks edited here. Save to compare them with the listener results.';});
+  $('saveBoundaries').addEventListener('click',async()=>{
+    if(!active)return;const take=active.id,revision=active.boundary_reference?.revision||0,text=$('boundaryTimes').value.trim();
+    const pieces=text?text.split(',').map(t=>t.trim()):[];
+    if(pieces.some(t=>!t||!/^\d+(?:\.\d+)?$/.test(t))){$('boundaryStatus').textContent='Use seconds separated by commas, like 2.40, 5.10.';return;}
+    const cuts=pieces.map(Number).sort((a,b)=>a-b),button=$('saveBoundaries');button.disabled=true;
+    try{const report=await api(`/api/comparisons/${take}/boundaries`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cuts,revision,audio_sha256:active.audio_sha256})});
+      if(active?.id!==take)return;active=report;renderBoundaryEditor(report);render(report);
+    }catch(error){if(active?.id===take)$('boundaryStatus').textContent=error.message;}finally{button.disabled=false;}
+  });
   function reviewForm(report, run, result) {
     const form = document.createElement('form');
     const saved = run.review.ratings?.[result.id];
